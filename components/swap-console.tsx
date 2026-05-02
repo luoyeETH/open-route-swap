@@ -110,6 +110,40 @@ function buildExplorerUrl(chainKey: ChainKey, hash: string): string {
   return explorerUrl ? `${explorerUrl}/tx/${hash}` : '#';
 }
 
+function SwapLogo({ size = 36 }: { size?: number }) {
+  return (
+    <svg
+      viewBox="0 0 40 40"
+      width={size}
+      height={size}
+      role="img"
+      aria-label="Open Route Swap"
+      className="shrink-0"
+    >
+      <rect width="40" height="40" rx="10" fill="#151c23" />
+      <path
+        d="M11 15.8H27.4L23.9 12.3"
+        fill="none"
+        stroke="#F8FAFC"
+        strokeWidth="2.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M29 24.2H12.6L16.1 27.7"
+        fill="none"
+        stroke="#9CA3AF"
+        strokeWidth="2.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <circle cx="29" cy="15.8" r="3.3" fill="#2DD4BF" />
+      <circle cx="11" cy="24.2" r="3.3" fill="#6B7280" />
+      <rect x="0.75" y="0.75" width="38.5" height="38.5" rx="9.25" fill="none" stroke="rgba(255,255,255,0.12)" strokeWidth="1.5" />
+    </svg>
+  );
+}
+
 function TokenAvatar({ token, size = 30 }: { token: TokenInfo; size?: number }) {
   const letter = token.symbol.charAt(0).toUpperCase();
   return (
@@ -1049,19 +1083,22 @@ export function SwapConsole() {
       <div className="mx-auto grid w-full max-w-[1080px] gap-4 lg:grid-cols-[520px_1fr]">
         <section className="space-y-3">
           <header className="flex items-center justify-between gap-3">
-            <div>
-              <h1 className="text-lg font-semibold tracking-normal">Open Route Swap</h1>
-              <div className="mono-num mt-0.5 text-xs text-white/40">fee {REQUIRED_OKX_FEE_PERCENT}%</div>
+            <div className="flex min-w-0 items-center gap-3">
+              <SwapLogo />
+              <div className="min-w-0">
+                <h1 className="truncate text-lg font-semibold tracking-normal">Open Route Swap</h1>
+                <div className="mono-num mt-0.5 text-xs text-white/40">fee {REQUIRED_OKX_FEE_PERCENT}%</div>
+              </div>
             </div>
             <div className="flex items-center gap-2">
               <select
                 value={chainKey}
                 onChange={(event) => setChainKey(event.target.value as ChainKey)}
-                className="h-9 max-w-[170px] rounded-lg border border-white/[0.08] bg-[#11171d] px-2.5 text-sm font-medium text-white outline-none transition hover:bg-white/[0.06] focus:border-teal-300/35"
+                className="chain-select h-9 max-w-[170px] rounded-lg border border-white/[0.12] bg-[#151c23] px-2.5 text-sm font-medium text-white outline-none transition hover:bg-[#1a222b] focus:border-teal-300/35"
                 title="选择链"
               >
                 {SELECTABLE_CHAIN_KEYS.map((key) => (
-                  <option key={key} value={key}>
+                  <option key={key} value={key} className="bg-[#151c23] text-white">
                     {CHAIN_CONFIGS[key].label}
                   </option>
                 ))}
@@ -1130,8 +1167,8 @@ export function SwapConsole() {
                     onClick={() => setSlippage(value)}
                     className={`mono-num h-8 flex-1 rounded-lg text-xs transition active:translate-y-px ${
                       slippage === value
-                        ? 'bg-teal-300/16 text-teal-100'
-                        : 'text-white/45 hover:bg-white/[0.06] hover:text-white/72'
+                        ? 'border border-white/[0.12] bg-[#374151] text-white shadow-inset'
+                        : 'border border-transparent text-white/45 hover:bg-[#242c35] hover:text-white/72'
                     }`}
                   >
                     {value}%
