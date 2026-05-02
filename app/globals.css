@@ -42,6 +42,12 @@ body {
   text-size-adjust: 100%;
 }
 
+@supports (padding: env(safe-area-inset-bottom)) {
+  body {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+}
+
 button,
 input,
 textarea,

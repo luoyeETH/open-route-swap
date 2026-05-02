@@ -5,8 +5,10 @@ import { formatUnits } from 'ethers';
 import {
   AlertTriangle,
   ArrowDownUp,
+  ChartCandlestick,
   Check,
   ChevronDown,
+  ClipboardPaste,
   ExternalLink,
   Loader2,
   Power,
@@ -31,6 +33,7 @@ import {
   getDefaultFromToken,
   getDefaultToToken,
   getOkxBaseUrl,
+  isEvmChain,
   isNativeToken,
   isSolanaChain,
   isSupportedSwapChain,
@@ -43,6 +46,7 @@ import {
   CredentialProvider,
   OkxClient,
   OkxCredentials,
+  OkxCandle,
   OkxQuote,
   getEnvDemoCredentials,
 } from '@/lib/okx-client';
@@ -87,11 +91,30 @@ type HistoryItem = {
   explorerUrl: string;
 };
 
+type AddressCandidate = {
+  kind: 'evm' | 'solana';
+  address: string;
+};
+
+type TokenMatch = {
+  chainKey: ChainKey;
+  token: TokenInfo;
+};
+
+type PendingChainSelection = {
+  chainKey: ChainKey;
+  fromAddress: string;
+  toToken: TokenInfo;
+};
+
 const SESSION_CREDENTIALS_KEY = 'open-route-swap.okx.credentials';
 const SESSION_MODE_KEY = 'open-route-swap.okx.mode';
 const SESSION_PROXY_KEY = 'open-route-swap.okx.proxy';
 const DEFAULT_NATIVE_GAS_RESERVE = '0.01';
 const SLIPPAGE_PRESETS = ['0.3', '0.5', '1'];
+const CANDLE_BARS = ['1m', '5m', '15m', '1H', '4H', '1Dutc'] as const;
+const CANDLE_LIMIT = '120';
+const ADDRESS_CANDIDATE_PATTERN = /0x[a-fA-F0-9]{40}|[1-9A-HJ-NP-Za-km-z]{32,44}/g;
 
 function getTokenColor(symbol: string): string {
   return TOKEN_COLORS[symbol.toUpperCase()] || '#4f8f86';
@@ -111,6 +134,31 @@ function isSameToken(left: string, right: string, chainKey: ChainKey): boolean {
 
 function tokenStorageKey(token: TokenInfo): string {
   return `${token.chainKey}:${normalizeTokenAddress(token.address, token.chainKey)}`;
+}
+
+function findTokenByAddress(tokens: TokenInfo[], chainKey: ChainKey, address: string): TokenInfo | null {
+  const normalized = normalizeTokenAddress(address, chainKey);
+  return tokens.find((token) => normalizeTokenAddress(token.address, chainKey) === normalized) || null;
+}
+
+function extractPastedAddress(text: string): AddressCandidate | null {
+  for (const match of text.matchAll(ADDRESS_CANDIDATE_PATTERN)) {
+    const value = match[0];
+    if (isValidEvmAddress(value)) {
+      return { kind: 'evm', address: normalizeTokenAddress(value) };
+    }
+    if (isValidSolanaAddress(value)) {
+      return { kind: 'solana', address: value };
+    }
+  }
+  return null;
+}
+
+function getDefaultFromTokenForTarget(chainKey: ChainKey, targetToken: TokenInfo): TokenInfo {
+  const defaultFromToken = getDefaultFromToken(chainKey);
+  if (!isSameToken(defaultFromToken.address, targetToken.address, chainKey)) return defaultFromToken;
+  return getCommonTokens(chainKey).find((token) => !isSameToken(token.address, targetToken.address, chainKey))
+    || defaultFromToken;
 }
 
 function emptyWalletState(): WalletState {
@@ -337,7 +385,7 @@ function TokenAmountPanel({
           onChange={(event) => onValueChange?.(normalizeDecimalInput(event.target.value))}
           placeholder="0"
           inputMode="decimal"
-          className="mono-num min-w-0 flex-1 bg-transparent text-[28px] font-semibold leading-none text-white outline-none placeholder:text-white/18 disabled:text-white/55"
+          className="mono-num min-w-0 flex-1 bg-transparent text-[22px] sm:text-[28px] font-semibold leading-none text-white outline-none placeholder:text-white/18 disabled:text-white/55"
         />
         <TokenSelectButton token={token} onClick={onTokenClick} />
       </div>
@@ -704,6 +752,248 @@ function ConfirmSwapModal({
   );
 }
 
+function candleTimestampToMs(timestamp: string): number {
+  const parsed = Number(timestamp);
+  if (!Number.isFinite(parsed)) return Date.now();
+  return parsed > 1_000_000_000_000 ? parsed : parsed * 1000;
+}
+
+function formatCandleTime(timestamp: string): string {
+  return new Date(candleTimestampToMs(timestamp)).toLocaleString('zh-CN', {
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
+function formatCandlePrice(value: number | null | undefined): string {
+  if (!Number.isFinite(value)) return '--';
+  const price = Number(value);
+  return formatNumber(price, Math.abs(price) < 0.01 ? 10 : 6);
+}
+
+function CandleChart({ candles }: { candles: OkxCandle[] }) {
+  const width = 720;
+  const height = 300;
+  const padding = { top: 16, right: 14, bottom: 26, left: 58 };
+  const innerWidth = width - padding.left - padding.right;
+  const innerHeight = height - padding.top - padding.bottom;
+  const lows = candles.map((candle) => candle.low);
+  const highs = candles.map((candle) => candle.high);
+  const low = Math.min(...lows);
+  const high = Math.max(...highs);
+  const range = high - low || Math.max(high * 0.002, 1);
+  const minPrice = low - range * 0.05;
+  const maxPrice = high + range * 0.05;
+  const yForPrice = (price: number) => padding.top + ((maxPrice - price) / (maxPrice - minPrice)) * innerHeight;
+  const step = candles.length > 1 ? innerWidth / (candles.length - 1) : innerWidth;
+  const bodyWidth = Math.max(2, Math.min(8, step * 0.58));
+  const ticks = Array.from({ length: 4 }, (_, index) => maxPrice - ((maxPrice - minPrice) * index) / 3);
+
+  return (
+    <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label="K 线图" className="h-full w-full">
+      <rect x="0" y="0" width={width} height={height} rx="14" fill="rgba(255,255,255,0.025)" />
+      {ticks.map((tick) => {
+        const y = yForPrice(tick);
+        return (
+          <g key={tick}>
+            <line x1={padding.left} x2={width - padding.right} y1={y} y2={y} stroke="rgba(255,255,255,0.07)" strokeWidth="1" />
+            <text x={padding.left - 8} y={y + 4} textAnchor="end" className="fill-white/38 text-[11px] mono-num">
+              {formatCandlePrice(tick)}
+            </text>
+          </g>
+        );
+      })}
+      {candles.map((candle, index) => {
+        const x = padding.left + (candles.length > 1 ? step * index : innerWidth / 2);
+        const highY = yForPrice(candle.high);
+        const lowY = yForPrice(candle.low);
+        const openY = yForPrice(candle.open);
+        const closeY = yForPrice(candle.close);
+        const isUp = candle.close >= candle.open;
+        const color = isUp ? '#2dd4bf' : '#fb7185';
+        const rawHeight = Math.abs(openY - closeY);
+        const bodyHeight = Math.max(1, rawHeight);
+        const bodyY = Math.min(openY, closeY) - (rawHeight < 1 ? 0.5 : 0);
+        return (
+          <g key={`${candle.timestamp}:${index}`}>
+            <line x1={x} x2={x} y1={highY} y2={lowY} stroke={color} strokeWidth="1.25" />
+            <rect
+              x={x - bodyWidth / 2}
+              y={bodyY}
+              width={bodyWidth}
+              height={bodyHeight}
+              rx="0.8"
+              fill={isUp ? 'rgba(45,212,191,0.82)' : 'rgba(251,113,133,0.82)'}
+            />
+          </g>
+        );
+      })}
+      {candles.length ? (
+        <>
+          <text x={padding.left} y={height - 7} className="fill-white/34 text-[11px] mono-num">
+            {formatCandleTime(candles[0].timestamp)}
+          </text>
+          <text x={width - padding.right} y={height - 7} textAnchor="end" className="fill-white/34 text-[11px] mono-num">
+            {formatCandleTime(candles[candles.length - 1].timestamp)}
+          </text>
+        </>
+      ) : null}
+    </svg>
+  );
+}
+
+function KlineModal({
+  open,
+  chainKey,
+  token,
+  okxClient,
+  onClose,
+}: {
+  open: boolean;
+  chainKey: ChainKey;
+  token: TokenInfo;
+  okxClient: OkxClient;
+  onClose: () => void;
+}) {
+  const [bar, setBar] = useState<(typeof CANDLE_BARS)[number]>('15m');
+  const [candles, setCandles] = useState<OkxCandle[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const requestIdRef = useRef(0);
+
+  useEffect(() => {
+    if (!open) return;
+    setBar('15m');
+  }, [chainKey, open, token.address]);
+
+  useEffect(() => {
+    if (!open) return;
+    const handle = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onClose();
+    };
+    document.addEventListener('keydown', handle);
+    return () => document.removeEventListener('keydown', handle);
+  }, [onClose, open]);
+
+  useEffect(() => {
+    if (!open) return;
+    const requestId = ++requestIdRef.current;
+    if (!okxClient.isReady) {
+      setCandles([]);
+      setLoading(false);
+      setError('请先设置 OKX');
+      return;
+    }
+    setLoading(true);
+    setError(null);
+    okxClient.getCandles({
+      chainKey,
+      tokenContractAddress: token.address,
+      bar,
+      limit: CANDLE_LIMIT,
+    })
+      .then((nextCandles) => {
+        if (requestId !== requestIdRef.current) return;
+        setCandles(nextCandles);
+        setError(null);
+      })
+      .catch((fetchError) => {
+        if (requestId !== requestIdRef.current) return;
+        setCandles([]);
+        setError(readErrorMessage(fetchError, 'K 线加载失败'));
+      })
+      .finally(() => {
+        if (requestId === requestIdRef.current) setLoading(false);
+      });
+  }, [bar, chainKey, okxClient, open, token.address]);
+
+  if (!open) return null;
+
+  const firstCandle = candles[0] || null;
+  const latestCandle = candles[candles.length - 1] || null;
+  const changePercent = firstCandle && latestCandle && firstCandle.open > 0
+    ? ((latestCandle.close - firstCandle.open) / firstCandle.open) * 100
+    : null;
+  const changeIsPositive = Number(changePercent) >= 0;
+
+  return (
+    <div className="fixed inset-0 z-40 flex items-end justify-center sm:items-center" onClick={onClose}>
+      <div className="absolute inset-0 bg-black/62 backdrop-blur-sm" />
+      <div
+        className="sheet-enter relative max-h-[88dvh] w-full max-w-[900px] overflow-hidden rounded-t-2xl border border-white/[0.08] bg-[#11171d] shadow-soft sm:rounded-2xl"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className="flex items-center justify-between gap-3 border-b border-white/[0.07] px-4 py-3">
+          <div className="flex min-w-0 items-center gap-3">
+            <TokenAvatar token={token} size={28} />
+            <div className="min-w-0">
+              <div className="truncate text-sm font-semibold">{token.symbol} K 线</div>
+              <div className="truncate text-xs text-white/38">{CHAIN_CONFIGS[chainKey].label} · {shortAddress(token.address)}</div>
+            </div>
+          </div>
+          <IconButton title="关闭" onClick={onClose}>
+            <X className="h-4 w-4" />
+          </IconButton>
+        </div>
+
+        <div className="space-y-3 p-3 sm:p-4">
+          <div className="grid grid-cols-1 gap-2 min-[360px]:grid-cols-2 sm:grid-cols-[1fr_1fr_auto]">
+            <div className="soft-inset rounded-xl p-3">
+              <div className="text-[11px] text-white/40">最新价</div>
+              <div className="mono-num mt-1 text-base font-semibold text-white">
+                {latestCandle ? formatCandlePrice(latestCandle.close) : '--'}
+              </div>
+            </div>
+            <div className="soft-inset rounded-xl p-3">
+              <div className="text-[11px] text-white/40">区间涨跌幅</div>
+              <div className={`mono-num mt-1 text-base font-semibold ${changeIsPositive ? 'text-teal-200' : 'text-rose-200'}`}>
+                {changePercent == null ? '--' : formatPercent(changePercent)}
+              </div>
+            </div>
+            <div className="grid grid-cols-3 gap-1 rounded-xl border border-white/[0.08] bg-white/[0.035] p-1 min-[360px]:col-span-2 sm:col-span-1">
+              {CANDLE_BARS.map((value) => (
+                <button
+                  type="button"
+                  key={value}
+                  onClick={() => setBar(value)}
+                  className={`mono-num h-8 min-w-0 rounded-lg px-2 text-xs transition active:translate-y-px ${
+                    bar === value
+                      ? 'border border-white/[0.12] bg-[#374151] text-white shadow-inset'
+                      : 'border border-transparent text-white/45 hover:bg-[#242c35] hover:text-white/72'
+                  }`}
+                >
+                  {value}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="h-[320px] rounded-2xl border border-white/[0.08] bg-white/[0.025] p-2">
+            {loading ? (
+              <div className="h-full space-y-3 p-3">
+                <div className="skeleton h-7 w-40 rounded-lg" />
+                <div className="skeleton h-[250px] rounded-xl" />
+              </div>
+            ) : error ? (
+              <div className="flex h-full items-center justify-center px-4 text-center text-sm text-amber-100/82">
+                {error}
+              </div>
+            ) : candles.length ? (
+              <CandleChart candles={candles} />
+            ) : (
+              <div className="flex h-full items-center justify-center text-sm text-white/40">
+                暂无 K 线数据
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function SwapConsole() {
   const [chainKey, setChainKey] = useState<ChainKey>(getDefaultChainKey());
   const [wallet, setWallet] = useState<WalletState>(emptyWalletState);
@@ -720,6 +1010,8 @@ export function SwapConsole() {
   const [activeTokenSide, setActiveTokenSide] = useState<TokenSide | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const [klineOpen, setKlineOpen] = useState(false);
+  const [pasteLoading, setPasteLoading] = useState(false);
   const [executionError, setExecutionError] = useState<string | null>(null);
   const [executionLoading, setExecutionLoading] = useState(false);
   const [history, setHistory] = useState<HistoryItem[]>([]);
@@ -730,6 +1022,7 @@ export function SwapConsole() {
 
   const quoteRequestIdRef = useRef(0);
   const balanceRequestIdRef = useRef(0);
+  const pendingChainSelectionRef = useRef<PendingChainSelection | null>(null);
   const chain = CHAIN_CONFIGS[chainKey];
   const isSolanaSelected = isSolanaChain(chainKey);
   const commonTokens = getCommonTokens(chainKey);
@@ -942,14 +1235,36 @@ export function SwapConsole() {
   }, [chainKey, manuallyDisconnectedKind]);
 
   useEffect(() => {
+    const pendingSelection = pendingChainSelectionRef.current;
+    if (pendingSelection?.chainKey === chainKey) {
+      pendingChainSelectionRef.current = null;
+      const nextCommonTokens = getCommonTokens(chainKey);
+      setTokens((current) => mergeTokenLists([...current, ...nextCommonTokens, pendingSelection.toToken]));
+      setFromAddress(pendingSelection.fromAddress);
+      setToAddress(pendingSelection.toToken.address);
+      setAmount('');
+      balanceRequestIdRef.current += 1;
+      quoteRequestIdRef.current += 1;
+      setBalances({});
+      setQuote(null);
+      setQuoteLoading(false);
+      setQuoteError(null);
+      setQuoteUpdatedAt(null);
+      setExecutionError(null);
+      return;
+    }
+
     const defaultFromToken = getDefaultFromToken(chainKey);
     const defaultToToken = getDefaultToToken(chainKey);
     setTokens((current) => mergeTokenLists([...current, ...getCommonTokens(chainKey)]));
     setFromAddress(defaultFromToken.address);
     setToAddress(defaultToToken.address);
     setAmount('');
+    balanceRequestIdRef.current += 1;
+    quoteRequestIdRef.current += 1;
     setBalances({});
     setQuote(null);
+    setQuoteLoading(false);
     setQuoteError(null);
     setQuoteUpdatedAt(null);
     setExecutionError(null);
@@ -968,6 +1283,91 @@ export function SwapConsole() {
     if (!incoming.length) return;
     setTokens((current) => mergeTokenLists([...current, ...incoming]));
   }, []);
+
+  const clearQuoteState = useCallback(() => {
+    quoteRequestIdRef.current += 1;
+    setQuote(null);
+    setQuoteLoading(false);
+    setQuoteError(null);
+    setQuoteUpdatedAt(null);
+  }, []);
+
+  const applyPastedToken = useCallback((match: TokenMatch) => {
+    addTokens([match.token]);
+    setExecutionError(null);
+    clearQuoteState();
+
+    if (match.chainKey === chainKey) {
+      setToAddress(match.token.address);
+      return;
+    }
+
+    const nextFromToken = getDefaultFromTokenForTarget(match.chainKey, match.token);
+    pendingChainSelectionRef.current = {
+      chainKey: match.chainKey,
+      fromAddress: nextFromToken.address,
+      toToken: match.token,
+    };
+    setTokens((current) => mergeTokenLists([
+      ...current,
+      ...getCommonTokens(match.chainKey),
+      nextFromToken,
+      match.token,
+    ]));
+    setChainKey(match.chainKey);
+  }, [addTokens, chainKey, clearQuoteState]);
+
+  const resolvePastedToken = useCallback(async (candidate: AddressCandidate): Promise<TokenMatch | null> => {
+    const currentLocalMatch = findTokenByAddress(chainTokens, chainKey, candidate.address);
+    if (currentLocalMatch) return { chainKey, token: currentLocalMatch };
+
+    const candidateChains: ChainKey[] = candidate.kind === 'solana'
+      ? ['solana']
+      : [
+        ...(isEvmChain(chainKey) ? [chainKey] : []),
+        ...SELECTABLE_CHAIN_KEYS.filter((key) => isEvmChain(key) && key !== chainKey),
+      ];
+
+    for (const candidateChainKey of candidateChains) {
+      if (candidateChainKey === chainKey) continue;
+      const localTokens = mergeTokenLists([
+        ...getCommonTokens(candidateChainKey),
+        ...tokens.filter((token) => token.chainKey === candidateChainKey),
+      ]);
+      const localMatch = findTokenByAddress(localTokens, candidateChainKey, candidate.address);
+      if (localMatch) return { chainKey: candidateChainKey, token: localMatch };
+    }
+
+    if (!okxClient.isReady) {
+      throw new Error('本地未找到该代币，请先设置 OKX');
+    }
+
+    for (const candidateChainKey of candidateChains) {
+      const remoteTokens = await okxClient.getAllTokens(candidateChainKey);
+      const remoteMatch = findTokenByAddress(remoteTokens, candidateChainKey, candidate.address);
+      if (remoteMatch) return { chainKey: candidateChainKey, token: remoteMatch };
+    }
+
+    return null;
+  }, [chainKey, chainTokens, okxClient, tokens]);
+
+  const handlePasteContract = useCallback(async () => {
+    setExecutionError(null);
+    setPasteLoading(true);
+    try {
+      if (!navigator.clipboard?.readText) throw new Error('当前浏览器不支持读取剪切板');
+      const text = await navigator.clipboard.readText();
+      const candidate = extractPastedAddress(text);
+      if (!candidate) throw new Error('剪切板里没有有效合约地址');
+      const match = await resolvePastedToken(candidate);
+      if (!match) throw new Error('未找到该代币');
+      applyPastedToken(match);
+    } catch (error) {
+      setExecutionError(readErrorMessage(error, '读取剪切板失败'));
+    } finally {
+      setPasteLoading(false);
+    }
+  }, [applyPastedToken, resolvePastedToken]);
 
   const refreshBalances = useCallback(async () => {
     if (!wallet.address || !isSupportedSwapChain(chainKey) || (isSolanaSelected && wallet.kind !== 'solana') || (!isSolanaSelected && wallet.kind !== 'evm')) return;
@@ -1278,7 +1678,7 @@ export function SwapConsole() {
     <main className="min-h-[100dvh] px-3 py-4 sm:px-5 sm:py-6">
       <div className="mx-auto grid w-full max-w-[1080px] gap-4 lg:grid-cols-[520px_1fr]">
         <section className="space-y-3">
-          <header className="flex items-center justify-between gap-3">
+          <header className="flex flex-wrap items-center justify-between gap-2 sm:gap-3">
             <div className="flex min-w-0 items-center gap-3">
               <SwapLogo />
               <div className="min-w-0">
@@ -1286,38 +1686,44 @@ export function SwapConsole() {
                 <div className="mono-num mt-0.5 text-xs text-white/40">fee {REQUIRED_OKX_FEE_PERCENT}%</div>
               </div>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex min-w-0 flex-1 flex-wrap items-center justify-end gap-2">
               <ChainDropdown value={chainKey} onChange={(key) => setChainKey(key)} />
               <IconButton title="OKX 设置" onClick={() => setSettingsOpen(true)}>
                 <Settings className="h-4 w-4" />
               </IconButton>
+              <button
+                type="button"
+                onClick={wallet.connected ? undefined : handleConnect}
+                disabled={wallet.connected}
+                className="flex h-9 max-w-[190px] min-w-0 items-center gap-2 rounded-lg border border-white/[0.08] bg-white/[0.045] px-3 text-sm text-white/72 transition hover:bg-white/[0.08] active:translate-y-px disabled:cursor-default disabled:hover:bg-white/[0.045] disabled:active:translate-y-0 sm:max-w-[220px]"
+              >
+                <Wallet className="h-4 w-4 shrink-0" />
+                <span className="truncate">{wallet.address ? shortAddress(wallet.address) : (isSolanaSelected ? '连接 Solana' : '连接钱包')}</span>
+              </button>
+              {wallet.connected ? (
+                <IconButton title="断开钱包" onClick={handleDisconnect}>
+                  <Power className="h-4 w-4" />
+                </IconButton>
+              ) : null}
             </div>
           </header>
 
           <div className="soft-panel rounded-3xl p-3">
-            <div className="mb-3 flex items-center justify-between gap-3 px-1">
-              <div className="flex items-center gap-2 text-xs text-white/45">
+            <div className="mb-3 flex items-center justify-between gap-2 px-1 sm:gap-3">
+              <div className="flex min-w-0 items-center gap-2 text-xs text-white/45">
                 <span className={`h-2 w-2 rounded-full ${okxClient.isReady ? 'bg-teal-300' : 'bg-white/22'}`} />
-                OKX {okxClient.isReady ? '已设置' : '未设置'}
+                <span className="truncate">OKX {okxClient.isReady ? '已设置' : '未设置'}</span>
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex shrink-0 items-center gap-2">
+                <IconButton title="粘贴合约" onClick={handlePasteContract} disabled={pasteLoading}>
+                  {pasteLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <ClipboardPaste className="h-4 w-4" />}
+                </IconButton>
                 <IconButton title="刷新报价" onClick={fetchQuote} disabled={quoteLoading}>
                   <RefreshCw className={`h-4 w-4 ${quoteLoading ? 'animate-spin' : ''}`} />
                 </IconButton>
-                <button
-                  type="button"
-                  onClick={wallet.connected ? undefined : handleConnect}
-                  disabled={wallet.connected}
-                  className="flex h-9 max-w-[220px] items-center gap-2 rounded-lg border border-white/[0.08] bg-white/[0.045] px-3 text-sm text-white/72 transition hover:bg-white/[0.08] active:translate-y-px disabled:cursor-default disabled:hover:bg-white/[0.045] disabled:active:translate-y-0"
-                >
-                  <Wallet className="h-4 w-4 shrink-0" />
-                  <span className="truncate">{wallet.address ? shortAddress(wallet.address) : (isSolanaSelected ? '连接 Solana' : '连接钱包')}</span>
-                </button>
-                {wallet.connected ? (
-                  <IconButton title="断开钱包" onClick={handleDisconnect}>
-                    <Power className="h-4 w-4" />
-                  </IconButton>
-                ) : null}
+                <IconButton title="查看 K 线" onClick={() => setKlineOpen(true)}>
+                  <ChartCandlestick className="h-4 w-4" />
+                </IconButton>
               </div>
             </div>
 
@@ -1373,7 +1779,7 @@ export function SwapConsole() {
                 <input
                   value={slippage}
                   onChange={(event) => setSlippage(normalizeDecimalInput(event.target.value))}
-                  className="mono-num h-8 w-16 rounded-lg border border-white/[0.06] bg-white/[0.04] px-2 text-center text-xs text-white outline-none focus:border-teal-300/35"
+                  className="mono-num h-8 w-14 sm:w-16 rounded-lg border border-white/[0.06] bg-white/[0.04] px-2 text-center text-xs text-white outline-none focus:border-teal-300/35"
                 />
               </div>
             </div>
@@ -1391,7 +1797,7 @@ export function SwapConsole() {
               type="button"
               onClick={handlePrimaryAction}
               disabled={executionLoading || (primaryIssue != null && !actionableIssues.has(primaryIssue))}
-              className="button-primary mt-3 flex h-12 w-full items-center justify-center gap-2 rounded-2xl text-sm font-bold transition active:translate-y-px disabled:opacity-50"
+              className="button-primary mt-3 flex h-11 w-full items-center justify-center gap-2 rounded-2xl text-sm font-bold transition active:translate-y-px disabled:opacity-50 sm:h-12"
             >
               {executionLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
               {executionLoading ? '处理中' : primaryIssue || 'Swap'}
@@ -1399,7 +1805,7 @@ export function SwapConsole() {
           </div>
         </section>
 
-        <aside className="space-y-3">
+        <aside className="space-y-3 lg:sticky lg:top-4">
           <section className="soft-panel rounded-3xl p-4">
             <div className="mb-3 flex items-center justify-between">
               <h2 className="text-sm font-semibold">报价</h2>
@@ -1521,6 +1927,14 @@ export function SwapConsole() {
         }}
         onSaveCredentials={saveCredentials}
         onClearCredentials={clearCredentials}
+      />
+
+      <KlineModal
+        open={klineOpen}
+        chainKey={chainKey}
+        token={toToken}
+        okxClient={okxClient}
+        onClose={() => setKlineOpen(false)}
       />
 
       <ConfirmSwapModal

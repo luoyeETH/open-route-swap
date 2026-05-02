@@ -93,6 +93,18 @@ export type OkxTokenBalance = TokenInfo & {
   isRiskToken: boolean;
 };
 
+export type OkxCandle = {
+  timestamp: string;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume: string;
+  volumeUsd: string;
+  confirmed: boolean;
+  raw: unknown;
+};
+
 type OkxEnvelope = {
   code?: string;
   msg?: string;
@@ -204,6 +216,31 @@ function readStringArray(value: unknown): string[] {
   return value
     .map((entry) => String(entry ?? '').trim())
     .filter(Boolean);
+}
+
+function parseCandle(value: unknown): OkxCandle | null {
+  if (!Array.isArray(value)) return null;
+  const [timestamp, open, high, low, close, volume] = value;
+  const confirmed = value[value.length - 1];
+  const volumeUsd = value.length >= 9 ? value[7] : value[6];
+  const parsedOpen = Number(open);
+  const parsedHigh = Number(high);
+  const parsedLow = Number(low);
+  const parsedClose = Number(close);
+  if (!timestamp || !Number.isFinite(parsedOpen) || !Number.isFinite(parsedHigh) || !Number.isFinite(parsedLow) || !Number.isFinite(parsedClose)) {
+    return null;
+  }
+  return {
+    timestamp: String(timestamp),
+    open: parsedOpen,
+    high: parsedHigh,
+    low: parsedLow,
+    close: parsedClose,
+    volume: String(volume ?? ''),
+    volumeUsd: String(volumeUsd ?? ''),
+    confirmed: String(confirmed ?? '') === '1',
+    raw: value,
+  };
 }
 
 function parseSolanaInstruction(value: unknown): OkxSolanaInstruction | null {
@@ -388,6 +425,27 @@ export class OkxClient {
         isRiskToken: parseBoolean(record.isRiskToken) === true,
       }];
     });
+  }
+
+  async getCandles(params: {
+    chainKey: ChainKey;
+    tokenContractAddress: string;
+    bar: string;
+    limit?: string;
+  }): Promise<OkxCandle[]> {
+    const chain = CHAIN_CONFIGS[params.chainKey];
+    const query = new URLSearchParams({
+      chainIndex: chain.chainIndex,
+      tokenContractAddress: normalizeTokenAddress(params.tokenContractAddress, params.chainKey),
+      bar: params.bar,
+      limit: params.limit || '120',
+    });
+    const result = await this.request('GET', '/api/v6/dex/market/candles', query);
+    assertOkxSuccess(result);
+    return dataArray(result)
+      .map(parseCandle)
+      .filter((candle): candle is OkxCandle => Boolean(candle))
+      .sort((left, right) => Number(left.timestamp) - Number(right.timestamp));
   }
 
   async getQuote(params: {
