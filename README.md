@@ -1,6 +1,6 @@
 # open-route-swap
 
-基于 OKX DEX API 的轻量级开源 Swap 前端。首版支持 BSC，固定平台费 `0.01%`。
+基于 OKX DEX API 的轻量级开源 Swap 前端。支持多条 EVM 链，固定平台费 `0.01%`。
 
 ## 运行
 
@@ -28,8 +28,19 @@ OKX 官方文档说明：
 
 ```bash
 NEXT_PUBLIC_BSC_RPC_URL=https://bsc-dataseed.binance.org
+NEXT_PUBLIC_ETHEREUM_RPC_URL=https://ethereum.publicnode.com
+NEXT_PUBLIC_POLYGON_RPC_URL=https://polygon-rpc.com
+NEXT_PUBLIC_ARBITRUM_RPC_URL=https://arb1.arbitrum.io/rpc
+NEXT_PUBLIC_OPTIMISM_RPC_URL=https://mainnet.optimism.io
+NEXT_PUBLIC_BASE_RPC_URL=https://mainnet.base.org
+NEXT_PUBLIC_AVALANCHE_RPC_URL=https://api.avax.network/ext/bc/C/rpc
+NEXT_PUBLIC_FANTOM_RPC_URL=https://rpc.ftm.tools
+NEXT_PUBLIC_LINEA_RPC_URL=https://rpc.linea.build
+NEXT_PUBLIC_ZKSYNC_RPC_URL=https://mainnet.era.zksync.io
 NEXT_PUBLIC_OKX_BASE_URL=https://web3.okx.com
 NEXT_PUBLIC_OKX_SIGNER_PROXY_URL=
 ```
+
+公开 RPC 已在代码内置；只有需要自定义节点、限流更高的 RPC 或私有网关时才需要覆盖。
 
 OKX Key 默认在页面内输入，仅保存到当前浏览器会话。公开环境变量和浏览器存储都不能保护 Secret，生产演示建议使用 signer proxy。

@@ -1,10 +1,11 @@
 import {
   CHAIN_CONFIGS,
-  OKX_NATIVE_TOKEN_ADDRESS,
   REQUIRED_OKX_FEE_PERCENT,
   type ChainKey,
   type TokenInfo,
+  getChainNativeSymbol,
   getOkxBaseUrl,
+  isNativeToken,
   normalizeTokenAddress,
 } from '@/lib/chains';
 
@@ -198,20 +199,10 @@ function parseToken(record: Record<string, unknown>, chainKey: ChainKey): TokenI
     'contractAddress',
     'tokenAddress',
   ]));
-  const symbol = readString(record, ['tokenSymbol', 'symbol', 'ticker'], 'TOKEN').toUpperCase();
+  const fallbackSymbol = isNativeToken(address) ? getChainNativeSymbol(chainKey) || 'NATIVE' : 'TOKEN';
+  const symbol = readString(record, ['tokenSymbol', 'symbol', 'ticker'], fallbackSymbol).toUpperCase();
   const name = readString(record, ['tokenName', 'name'], symbol);
   const decimals = readNumber(record, ['decimals', 'decimal', 'tokenDecimal'], 18);
-  if (!address || address === OKX_NATIVE_TOKEN_ADDRESS && symbol !== 'BNB') {
-    return {
-      chainKey,
-      address,
-      symbol: symbol || 'BNB',
-      name: name || symbol || 'BNB',
-      decimals,
-      logoUrl: readString(record, ['tokenLogoUrl', 'logoUrl', 'logo'], '') || null,
-      source: 'okx',
-    };
-  }
   return {
     chainKey,
     address,

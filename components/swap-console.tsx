@@ -16,17 +16,21 @@ import {
   X,
 } from 'lucide-react';
 import {
-  BSC_COMMON_TOKENS,
   CHAIN_CONFIGS,
+  SELECTABLE_CHAIN_KEYS,
   REQUIRED_OKX_FEE_PERCENT,
   TOKEN_COLORS,
   type ChainKey,
   type TokenInfo,
+  getCommonTokens,
   getConfiguredFeePercent,
   getConfiguredReferrerAddress,
   getDefaultChainKey,
+  getDefaultFromToken,
+  getDefaultToToken,
   getOkxBaseUrl,
   isNativeToken,
+  isSupportedSwapChain,
   isValidEvmAddress,
   mergeTokenLists,
   normalizeTokenAddress,
@@ -42,9 +46,10 @@ import {
   WalletState,
   approveToken,
   connectWallet,
+  getNativeGasSymbol,
   getInjectedProvider,
   getWalletState,
-  isBscWallet,
+  isWalletOnChain,
   parseTokenAmount,
   readAllowance,
   readTokenBalance,
@@ -96,8 +101,13 @@ function isSameToken(left: string, right: string): boolean {
   return normalizeTokenAddress(left) === normalizeTokenAddress(right);
 }
 
-function buildExplorerUrl(hash: string): string {
-  return `${CHAIN_CONFIGS.bsc.blockExplorerUrl}/tx/${hash}`;
+function tokenStorageKey(token: TokenInfo): string {
+  return `${token.chainKey}:${normalizeTokenAddress(token.address)}`;
+}
+
+function buildExplorerUrl(chainKey: ChainKey, hash: string): string {
+  const explorerUrl = CHAIN_CONFIGS[chainKey].blockExplorerUrl;
+  return explorerUrl ? `${explorerUrl}/tx/${hash}` : '#';
 }
 
 function TokenAvatar({ token, size = 30 }: { token: TokenInfo; size?: number }) {
@@ -581,9 +591,9 @@ function ConfirmSwapModal({
 export function SwapConsole() {
   const [chainKey, setChainKey] = useState<ChainKey>(getDefaultChainKey());
   const [wallet, setWallet] = useState<WalletState>({ address: null, chainId: null, connected: false });
-  const [tokens, setTokens] = useState<TokenInfo[]>(BSC_COMMON_TOKENS);
-  const [fromAddress, setFromAddress] = useState(BSC_COMMON_TOKENS[0].address);
-  const [toAddress, setToAddress] = useState(BSC_COMMON_TOKENS[2].address);
+  const [tokens, setTokens] = useState<TokenInfo[]>(() => getCommonTokens(getDefaultChainKey()));
+  const [fromAddress, setFromAddress] = useState(() => getDefaultFromToken(getDefaultChainKey()).address);
+  const [toAddress, setToAddress] = useState(() => getDefaultToToken(getDefaultChainKey()).address);
   const [amount, setAmount] = useState('');
   const [slippage, setSlippage] = useState('0.5');
   const [balances, setBalances] = useState<Record<string, TokenBalance>>({});
@@ -603,14 +613,23 @@ export function SwapConsole() {
 
   const quoteRequestIdRef = useRef(0);
   const balanceRequestIdRef = useRef(0);
+  const chain = CHAIN_CONFIGS[chainKey];
+  const commonTokens = getCommonTokens(chainKey);
+  const chainTokens = useMemo(
+    () => mergeTokenLists([...commonTokens, ...tokens.filter((token) => token.chainKey === chainKey)]),
+    [chainKey, commonTokens, tokens]
+  );
+  const nativeGasSymbol = getNativeGasSymbol(chainKey);
+  const expectedChainLabel = chain.label;
+  const walletOnSelectedChain = isWalletOnChain(wallet.chainId, chainKey);
 
   const fromToken = useMemo(
-    () => tokens.find((token) => isSameToken(token.address, fromAddress)) || BSC_COMMON_TOKENS[0],
-    [fromAddress, tokens]
+    () => chainTokens.find((token) => isSameToken(token.address, fromAddress)) || getDefaultFromToken(chainKey),
+    [chainKey, chainTokens, fromAddress]
   );
   const toToken = useMemo(
-    () => tokens.find((token) => isSameToken(token.address, toAddress)) || BSC_COMMON_TOKENS[2],
-    [toAddress, tokens]
+    () => chainTokens.find((token) => isSameToken(token.address, toAddress)) || getDefaultToToken(chainKey),
+    [chainKey, chainTokens, toAddress]
   );
 
   const envDemoCredentials = useMemo(() => getEnvDemoCredentials(), []);
@@ -625,14 +644,14 @@ export function SwapConsole() {
   const feePercent = getConfiguredFeePercent();
   const referrerAddress = getConfiguredReferrerAddress();
   const configError = useMemo(() => {
-    if (chainKey !== 'bsc') return 'Solana 暂未开放';
+    if (!isSupportedSwapChain(chainKey)) return `${chain.label} 暂未开放`;
     if (Number(feePercent) !== Number(REQUIRED_OKX_FEE_PERCENT)) return '费率必须为 0.01%';
     if (!isValidEvmAddress(referrerAddress)) return '缺手续费地址';
     return null;
-  }, [chainKey, feePercent, referrerAddress]);
+  }, [chain.label, chainKey, feePercent, referrerAddress]);
 
-  const fromBalance = balances[normalizeTokenAddress(fromToken.address)] || null;
-  const toBalance = balances[normalizeTokenAddress(toToken.address)] || null;
+  const fromBalance = balances[tokenStorageKey(fromToken)] || null;
+  const toBalance = balances[tokenStorageKey(toToken)] || null;
   const amountRaw = useMemo(() => {
     if (!isPositiveAmount(amount)) return null;
     try {
@@ -658,7 +677,7 @@ export function SwapConsole() {
 
   const primaryIssue = useMemo(() => {
     if (!wallet.connected) return '连接钱包';
-    if (!isBscWallet(wallet.chainId)) return '切换 BSC';
+    if (!walletOnSelectedChain) return `切换 ${expectedChainLabel}`;
     if (!okxClient.isReady) return '设置 OKX';
     if (configError) return configError;
     if (!isPositiveAmount(amount)) return '输入数量';
@@ -668,12 +687,23 @@ export function SwapConsole() {
     if (!quote) return '获取报价';
     if (quote.isHoneyPot === true) return '风险代币';
     return null;
-  }, [amount, amountRaw, balanceTooLow, configError, okxClient.isReady, quote, quoteLoading, wallet.chainId, wallet.connected]);
+  }, [
+    amount,
+    amountRaw,
+    balanceTooLow,
+    configError,
+    expectedChainLabel,
+    okxClient.isReady,
+    quote,
+    quoteLoading,
+    wallet.connected,
+    walletOnSelectedChain,
+  ]);
 
   const outputAmount = quote ? formatTokenUnits(quote.toTokenAmount, toToken.decimals, 8) : '';
   const actionableIssues = useMemo(
-    () => new Set(['连接钱包', '切换 BSC', '设置 OKX', '获取报价']),
-    []
+    () => new Set(['连接钱包', `切换 ${expectedChainLabel}`, '设置 OKX', '获取报价']),
+    [expectedChainLabel]
   );
 
   useEffect(() => {
@@ -742,31 +772,45 @@ export function SwapConsole() {
     };
   }, []);
 
+  useEffect(() => {
+    const defaultFromToken = getDefaultFromToken(chainKey);
+    const defaultToToken = getDefaultToToken(chainKey);
+    setTokens((current) => mergeTokenLists([...current, ...getCommonTokens(chainKey)]));
+    setFromAddress(defaultFromToken.address);
+    setToAddress(defaultToToken.address);
+    setAmount('');
+    setBalances({});
+    setQuote(null);
+    setQuoteError(null);
+    setQuoteUpdatedAt(null);
+    setExecutionError(null);
+  }, [chainKey]);
+
   const addTokens = useCallback((incoming: TokenInfo[]) => {
     if (!incoming.length) return;
     setTokens((current) => mergeTokenLists([...current, ...incoming]));
   }, []);
 
   const refreshBalances = useCallback(async () => {
-    if (!wallet.address || chainKey !== 'bsc') return;
+    if (!wallet.address || !isSupportedSwapChain(chainKey)) return;
     const requestId = ++balanceRequestIdRef.current;
-    const tokenList = mergeTokenLists([...BSC_COMMON_TOKENS, fromToken, toToken]);
+    const tokenList = mergeTokenLists([...commonTokens, fromToken, toToken]);
     try {
       const settled = await Promise.allSettled(
-        tokenList.map((token) => readTokenBalance(token, wallet.address as string, 'bsc'))
+        tokenList.map((token) => readTokenBalance(token, wallet.address as string, chainKey))
       );
       if (requestId !== balanceRequestIdRef.current) return;
       const next: Record<string, TokenBalance> = {};
       for (const item of settled) {
         if (item.status === 'fulfilled') {
-          next[normalizeTokenAddress(item.value.token.address)] = item.value;
+          next[tokenStorageKey(item.value.token)] = item.value;
         }
       }
       setBalances(next);
     } catch {
       if (requestId === balanceRequestIdRef.current) setBalances({});
     }
-  }, [chainKey, fromToken, toToken, wallet.address]);
+  }, [chainKey, commonTokens, fromToken, toToken, wallet.address]);
 
   useEffect(() => {
     refreshBalances();
@@ -775,7 +819,7 @@ export function SwapConsole() {
   const fetchQuote = useCallback(async () => {
     setQuote(null);
     setQuoteError(null);
-    if (chainKey !== 'bsc' || !okxClient.isReady || !isPositiveAmount(amount) || !amountRaw) {
+    if (!isSupportedSwapChain(chainKey) || !okxClient.isReady || !isPositiveAmount(amount) || !amountRaw) {
       return;
     }
     if (isSameToken(fromToken.address, toToken.address)) {
@@ -786,7 +830,7 @@ export function SwapConsole() {
     setQuoteLoading(true);
     try {
       const nextQuote = await okxClient.getQuote({
-        chainKey: 'bsc',
+        chainKey,
         fromTokenAddress: fromToken.address,
         toTokenAddress: toToken.address,
         amount: amountRaw,
@@ -845,12 +889,12 @@ export function SwapConsole() {
   const handleSwitchChain = useCallback(async () => {
     setExecutionError(null);
     try {
-      await switchToChain('bsc');
+      await switchToChain(chainKey);
       setWallet(await getWalletState());
     } catch (error) {
       setExecutionError(readErrorMessage(error, '切链失败'));
     }
-  }, []);
+  }, [chainKey]);
 
   const handleDisconnect = useCallback(() => {
     setWallet({ address: null, chainId: null, connected: false });
@@ -884,7 +928,7 @@ export function SwapConsole() {
       await handleConnect();
       return;
     }
-    if (!isBscWallet(wallet.chainId)) {
+    if (!walletOnSelectedChain) {
       await handleSwitchChain();
       return;
     }
@@ -897,7 +941,16 @@ export function SwapConsole() {
       return;
     }
     if (!primaryIssue) setConfirmOpen(true);
-  }, [fetchQuote, handleConnect, handleSwitchChain, okxClient.isReady, primaryIssue, quote, wallet.chainId, wallet.connected]);
+  }, [
+    fetchQuote,
+    handleConnect,
+    handleSwitchChain,
+    okxClient.isReady,
+    primaryIssue,
+    quote,
+    wallet.connected,
+    walletOnSelectedChain,
+  ]);
 
   const upsertHistory = useCallback((item: HistoryItem) => {
     setHistory((current) => [item, ...current.filter((row) => row.id !== item.id)].slice(0, 8));
@@ -908,19 +961,19 @@ export function SwapConsole() {
   }, []);
 
   const executeSwap = useCallback(async () => {
-    if (!wallet.address || !amountRaw || !quote || configError) return;
+    if (!wallet.address || !amountRaw || !quote || configError || !walletOnSelectedChain) return;
     setExecutionLoading(true);
     setExecutionError(null);
     try {
       if (!isNativeToken(fromToken.address)) {
         const approval = await okxClient.getApproveTransaction({
-          chainKey: 'bsc',
+          chainKey,
           tokenContractAddress: fromToken.address,
           approveAmount: amountRaw,
         });
         const spender = approval.dexContractAddress;
         if (!spender) throw new Error('OKX 授权地址为空');
-        const allowance = await readAllowance(fromToken.address, wallet.address, spender, 'bsc');
+        const allowance = await readAllowance(fromToken.address, wallet.address, spender, chainKey);
         if (allowance < BigInt(amountRaw)) {
           const approveTx = await approveToken(fromToken.address, spender, BigInt(amountRaw));
           const approveId = `approve:${approveTx.hash}`;
@@ -931,7 +984,7 @@ export function SwapConsole() {
             hash: approveTx.hash,
             title: `授权 ${fromToken.symbol}`,
             createdAt: nowTimeLabel(),
-            explorerUrl: buildExplorerUrl(approveTx.hash),
+            explorerUrl: buildExplorerUrl(chainKey, approveTx.hash),
           });
           const receipt = await approveTx.wait();
           updateHistoryStatus(approveId, receipt?.status === 1 ? 'success' : 'failed');
@@ -940,7 +993,7 @@ export function SwapConsole() {
       }
 
       const swap = await okxClient.getSwapTransaction({
-        chainKey: 'bsc',
+        chainKey,
         fromTokenAddress: fromToken.address,
         toTokenAddress: toToken.address,
         amount: amountRaw,
@@ -958,7 +1011,7 @@ export function SwapConsole() {
         hash: tx.hash,
         title: `${fromToken.symbol} -> ${toToken.symbol}`,
         createdAt: nowTimeLabel(),
-        explorerUrl: buildExplorerUrl(tx.hash),
+        explorerUrl: buildExplorerUrl(chainKey, tx.hash),
       });
       setConfirmOpen(false);
       const receipt = await tx.wait();
@@ -973,6 +1026,7 @@ export function SwapConsole() {
     }
   }, [
     amountRaw,
+    chainKey,
     configError,
     fetchQuote,
     fromToken.address,
@@ -987,6 +1041,7 @@ export function SwapConsole() {
     updateHistoryStatus,
     upsertHistory,
     wallet.address,
+    walletOnSelectedChain,
   ]);
 
   return (
@@ -999,21 +1054,18 @@ export function SwapConsole() {
               <div className="mono-num mt-0.5 text-xs text-white/40">fee {REQUIRED_OKX_FEE_PERCENT}%</div>
             </div>
             <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={() => setChainKey('bsc')}
-                className="h-9 rounded-lg border border-teal-300/25 bg-teal-300/10 px-3 text-sm font-medium text-teal-100"
+              <select
+                value={chainKey}
+                onChange={(event) => setChainKey(event.target.value as ChainKey)}
+                className="h-9 max-w-[170px] rounded-lg border border-white/[0.08] bg-[#11171d] px-2.5 text-sm font-medium text-white outline-none transition hover:bg-white/[0.06] focus:border-teal-300/35"
+                title="选择链"
               >
-                BSC
-              </button>
-              <button
-                type="button"
-                onClick={() => setChainKey('solana')}
-                className="h-9 rounded-lg border border-white/[0.08] bg-white/[0.04] px-3 text-sm text-white/42"
-                title="预留"
-              >
-                SOL
-              </button>
+                {SELECTABLE_CHAIN_KEYS.map((key) => (
+                  <option key={key} value={key}>
+                    {CHAIN_CONFIGS[key].label}
+                  </option>
+                ))}
+              </select>
               <IconButton title="OKX 设置" onClick={() => setSettingsOpen(true)}>
                 <Settings className="h-4 w-4" />
               </IconButton>
@@ -1133,7 +1185,7 @@ export function SwapConsole() {
               <div className="divide-y divide-white/[0.07] text-sm">
                 <InfoRow label="预计收到" value={`${formatTokenUnits(quote.toTokenAmount, toToken.decimals, 8)} ${toToken.symbol}`} />
                 <InfoRow label="价格影响" value={formatPercent(quote.priceImpactPercent)} danger={highImpact} />
-                <InfoRow label="Gas 估算" value={quote.estimateGasFee ? `${formatNumber(quote.estimateGasFee, 6)} BNB` : '--'} />
+                <InfoRow label="Gas 估算" value={quote.estimateGasFee ? `${formatNumber(quote.estimateGasFee, 6)} ${nativeGasSymbol}` : '--'} />
                 <InfoRow label="路径" value={routeLabel} />
                 <InfoRow label="平台费" value={`${REQUIRED_OKX_FEE_PERCENT}%`} />
               </div>
@@ -1152,10 +1204,10 @@ export function SwapConsole() {
               </button>
             </div>
             <div className="space-y-2">
-              {mergeTokenLists([fromToken, toToken, ...BSC_COMMON_TOKENS.slice(0, 4)]).slice(0, 6).map((token) => {
-                const balance = balances[normalizeTokenAddress(token.address)];
+              {mergeTokenLists([fromToken, toToken, ...commonTokens.slice(0, 4)]).slice(0, 6).map((token) => {
+                const balance = balances[tokenStorageKey(token)];
                 return (
-                  <div key={token.address} className="flex items-center gap-3 rounded-xl border border-white/[0.06] bg-white/[0.03] px-3 py-2">
+                  <div key={tokenStorageKey(token)} className="flex items-center gap-3 rounded-xl border border-white/[0.06] bg-white/[0.03] px-3 py-2">
                     <TokenAvatar token={token} size={26} />
                     <div className="min-w-0 flex-1">
                       <div className="truncate text-sm font-medium">{token.symbol}</div>
@@ -1206,7 +1258,7 @@ export function SwapConsole() {
         open={Boolean(activeTokenSide)}
         side={activeTokenSide || 'from'}
         chainKey={chainKey}
-        tokens={tokens}
+        tokens={chainTokens}
         selectedAddress={activeTokenSide === 'to' ? toToken.address : fromToken.address}
         disabledAddress={activeTokenSide === 'to' ? fromToken.address : toToken.address}
         okxClient={okxClient}

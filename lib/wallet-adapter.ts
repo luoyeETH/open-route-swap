@@ -12,7 +12,9 @@ import {
   OKX_NATIVE_TOKEN_ADDRESS,
   type ChainKey,
   type TokenInfo,
+  getChainNativeSymbol,
   isNativeToken,
+  isSupportedSwapChain,
   normalizeTokenAddress,
 } from '@/lib/chains';
 
@@ -55,6 +57,7 @@ export function getInjectedProvider(): Eip1193Provider | null {
 
 export function getReadProvider(chainKey: ChainKey): JsonRpcProvider {
   const rpcUrl = CHAIN_CONFIGS[chainKey].rpcUrls[0];
+  if (!rpcUrl) throw new Error('当前链缺少 RPC');
   return new JsonRpcProvider(rpcUrl);
 }
 
@@ -87,7 +90,7 @@ export async function getWalletState(): Promise<WalletState> {
 export async function switchToChain(chainKey: ChainKey): Promise<void> {
   const injected = getInjectedProvider();
   const chain = CHAIN_CONFIGS[chainKey];
-  if (!injected || !chain.chainIdHex || !chain.nativeCurrency) {
+  if (!injected || !isSupportedSwapChain(chainKey) || !chain.chainIdHex || !chain.nativeCurrency) {
     throw new Error('当前链暂不支持浏览器钱包切换');
   }
 
@@ -105,7 +108,7 @@ export async function switchToChain(chainKey: ChainKey): Promise<void> {
       method: 'wallet_addEthereumChain',
       params: [{
         chainId: chain.chainIdHex,
-        chainName: 'BNB Smart Chain',
+        chainName: chain.label,
         nativeCurrency: chain.nativeCurrency,
         rpcUrls: chain.rpcUrls,
         blockExplorerUrls: chain.blockExplorerUrl ? [chain.blockExplorerUrl] : [],
@@ -169,7 +172,7 @@ export async function approveToken(
   spender: string,
   amount: bigint
 ): Promise<TransactionResponse> {
-  if (isNativeToken(tokenAddress)) throw new Error('原生 BNB 不需要授权');
+  if (isNativeToken(tokenAddress)) throw new Error('原生代币不需要授权');
   if (!isAddress(spender)) throw new Error('OKX 授权地址无效');
   const provider = getBrowserProvider();
   const signer = await provider.getSigner();
@@ -197,6 +200,10 @@ export function parseTokenAmount(amount: string, decimals: number): bigint {
   return parseUnits(amount, decimals);
 }
 
-export function isBscWallet(chainId: number | null): boolean {
-  return chainId === CHAIN_CONFIGS.bsc.chainId;
+export function isWalletOnChain(chainId: number | null, chainKey: ChainKey): boolean {
+  return chainId === CHAIN_CONFIGS[chainKey].chainId;
+}
+
+export function getNativeGasSymbol(chainKey: ChainKey): string {
+  return getChainNativeSymbol(chainKey) || 'Gas';
 }
