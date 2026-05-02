@@ -2,6 +2,10 @@
 
 import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import { formatUnits } from 'ethers';
+import { useConnectModal } from '@rainbow-me/rainbowkit';
+import { useWallet } from '@solana/wallet-adapter-react';
+import { useWalletModal } from '@solana/wallet-adapter-react-ui';
+import { useAccount, useDisconnect, useSwitchChain, useWalletClient } from 'wagmi';
 import {
   AlertTriangle,
   ArrowDownUp,
@@ -53,20 +57,16 @@ import {
 import {
   WalletState,
   approveToken,
-  connectSolanaWallet,
-  connectWallet,
   getNativeGasSymbol,
-  getInjectedProvider,
-  getInjectedSolanaProvider,
-  getSolanaWalletState,
-  getWalletState,
+  getWalletStateFromEvmAccount,
+  getWalletStateFromSolanaAccount,
   isWalletOnChain,
   parseTokenAmount,
   readAllowance,
   readTokenBalance,
   sendSolanaSwapInstructions,
   sendSwapTransaction,
-  switchToChain,
+  waitForEvmReceipt,
   type TokenBalance,
 } from '@/lib/wallet-adapter';
 import {
@@ -995,6 +995,13 @@ function KlineModal({
 }
 
 export function SwapConsole() {
+  const evmAccount = useAccount();
+  const { data: evmWalletClient } = useWalletClient();
+  const { disconnectAsync: disconnectEvmWallet } = useDisconnect();
+  const { switchChainAsync } = useSwitchChain();
+  const { openConnectModal } = useConnectModal();
+  const solanaWallet = useWallet();
+  const { setVisible: setSolanaWalletModalVisible } = useWalletModal();
   const [chainKey, setChainKey] = useState<ChainKey>(getDefaultChainKey());
   const [wallet, setWallet] = useState<WalletState>(emptyWalletState);
   const [tokens, setTokens] = useState<TokenInfo[]>(() => getCommonTokens(getDefaultChainKey()));
@@ -1018,7 +1025,6 @@ export function SwapConsole() {
   const [credentialMode, setCredentialMode] = useState<CredentialProvider>('none');
   const [credentials, setCredentials] = useState<OkxCredentials>({ apiKey: '', secretKey: '', passphrase: '' });
   const [signerProxyUrl, setSignerProxyUrl] = useState(process.env.NEXT_PUBLIC_OKX_SIGNER_PROXY_URL?.trim() || '');
-  const [manuallyDisconnectedKind, setManuallyDisconnectedKind] = useState<WalletState['kind']>(null);
 
   const quoteRequestIdRef = useRef(0);
   const balanceRequestIdRef = useRef(0);
@@ -1158,81 +1164,26 @@ export function SwapConsole() {
   }, [envDemoCredentials]);
 
   useEffect(() => {
-    if (manuallyDisconnectedKind === selectedWalletKind) return;
-    let mounted = true;
-    const readState = chainKey === 'solana' ? getSolanaWalletState() : getWalletState();
-    readState
-      .then((state) => {
-        if (mounted && (state.connected || wallet.kind !== selectedWalletKind)) setWallet(state);
+    const nextWallet = isSolanaSelected
+      ? getWalletStateFromSolanaAccount({
+        address: solanaWallet.publicKey?.toString(),
+        connected: solanaWallet.connected,
       })
-      .catch(() => undefined);
-    return () => {
-      mounted = false;
-    };
-  }, [chainKey, manuallyDisconnectedKind, selectedWalletKind, wallet.kind]);
-
-  useEffect(() => {
-    const provider = getInjectedProvider();
-    if (!provider?.on) return;
-    const handleAccountsChanged = (accountsValue: unknown) => {
-      if (chainKey === 'solana') return;
-      const accounts = Array.isArray(accountsValue) ? accountsValue : [];
-      if (manuallyDisconnectedKind === 'evm' && typeof accounts[0] === 'string') return;
-      setWallet((current) => ({
-        ...current,
-        address: typeof accounts[0] === 'string' ? accounts[0] : null,
-        connected: typeof accounts[0] === 'string',
-        kind: typeof accounts[0] === 'string' ? 'evm' : null,
-      }));
-    };
-    const handleChainChanged = (chainIdValue: unknown) => {
-      if (chainKey === 'solana') return;
-      const chainIdHex = String(chainIdValue || '0x0');
-      setWallet((current) => ({
-        ...current,
-        chainId: Number.parseInt(chainIdHex, 16),
-      }));
-    };
-    provider.on('accountsChanged', handleAccountsChanged);
-    provider.on('chainChanged', handleChainChanged);
-    return () => {
-      provider.removeListener?.('accountsChanged', handleAccountsChanged);
-      provider.removeListener?.('chainChanged', handleChainChanged);
-    };
-  }, [chainKey, manuallyDisconnectedKind]);
-
-  useEffect(() => {
-    const provider = getInjectedSolanaProvider();
-    if (!provider?.on) return;
-    const handleConnect = (publicKeyValue: unknown) => {
-      if (chainKey !== 'solana') return;
-      if (manuallyDisconnectedKind === 'solana') return;
-      const address = publicKeyValue && typeof publicKeyValue === 'object' && 'toString' in publicKeyValue
-        ? publicKeyValue.toString()
-        : typeof publicKeyValue === 'string'
-          ? publicKeyValue
-          : provider.publicKey?.toString() || null;
-      setWallet({
-        address,
-        chainId: null,
-        connected: Boolean(address),
-        kind: address ? 'solana' : null,
+      : getWalletStateFromEvmAccount({
+        address: evmAccount.address,
+        chainId: evmAccount.chainId,
+        connected: evmAccount.isConnected,
       });
-    };
-    const handleDisconnect = () => {
-      if (chainKey !== 'solana') return;
-      setWallet(emptyWalletState());
-      setBalances({});
-    };
-    provider.on('connect', handleConnect);
-    provider.on('disconnect', handleDisconnect);
-    provider.on('accountChanged', handleConnect);
-    return () => {
-      provider.removeListener?.('connect', handleConnect);
-      provider.removeListener?.('disconnect', handleDisconnect);
-      provider.removeListener?.('accountChanged', handleConnect);
-    };
-  }, [chainKey, manuallyDisconnectedKind]);
+    setWallet(nextWallet);
+    setBalances({});
+  }, [
+    evmAccount.address,
+    evmAccount.chainId,
+    evmAccount.isConnected,
+    isSolanaSelected,
+    solanaWallet.connected,
+    solanaWallet.publicKey,
+  ]);
 
   useEffect(() => {
     const pendingSelection = pendingChainSelectionRef.current;
@@ -1457,32 +1408,33 @@ export function SwapConsole() {
 
   const handleConnect = useCallback(async () => {
     setExecutionError(null);
-    setManuallyDisconnectedKind(null);
-    try {
-      setWallet(isSolanaSelected ? await connectSolanaWallet() : await connectWallet());
-    } catch (error) {
-      setExecutionError(readErrorMessage(error, '连接失败'));
+    if (isSolanaSelected) {
+      setSolanaWalletModalVisible(true);
+      return;
     }
-  }, [isSolanaSelected]);
+    openConnectModal?.();
+  }, [isSolanaSelected, openConnectModal, setSolanaWalletModalVisible]);
 
   const handleSwitchChain = useCallback(async () => {
     setExecutionError(null);
     try {
-      await switchToChain(chainKey);
-      setWallet(await getWalletState());
+      const chainId = CHAIN_CONFIGS[chainKey].chainId;
+      if (!chainId) throw new Error('当前链不支持 EVM 钱包切换');
+      await switchChainAsync({ chainId });
     } catch (error) {
       setExecutionError(readErrorMessage(error, '切链失败'));
     }
-  }, [chainKey]);
+  }, [chainKey, switchChainAsync]);
 
   const handleDisconnect = useCallback(async () => {
-    setManuallyDisconnectedKind(selectedWalletKind);
     if (selectedWalletKind === 'solana') {
-      await getInjectedSolanaProvider()?.disconnect?.().catch(() => undefined);
+      await solanaWallet.disconnect().catch(() => undefined);
+    } else {
+      await disconnectEvmWallet().catch(() => undefined);
     }
     setWallet(emptyWalletState());
     setBalances({});
-  }, [selectedWalletKind]);
+  }, [disconnectEvmWallet, selectedWalletKind, solanaWallet]);
 
   const handleMax = useCallback(() => {
     if (!fromBalance) return;
@@ -1563,6 +1515,7 @@ export function SwapConsole() {
     setExecutionError(null);
     try {
       if (isSolanaSelected) {
+        if (!solanaWallet.signTransaction) throw new Error('当前 Solana 钱包不支持签名交易');
         const swap = await okxClient.getSolanaSwapInstructions({
           fromTokenAddress: fromToken.address,
           toTokenAddress: toToken.address,
@@ -1576,6 +1529,7 @@ export function SwapConsole() {
           instructions: swap.instructionLists,
           addressLookupTableAccounts: swap.addressLookupTableAccount,
           walletAddress: wallet.address,
+          signTransaction: solanaWallet.signTransaction,
         });
         const swapId = `swap:${signature}`;
         upsertHistory({
@@ -1603,20 +1557,21 @@ export function SwapConsole() {
         if (!spender) throw new Error('OKX 授权地址为空');
         const allowance = await readAllowance(fromToken.address, wallet.address, spender, chainKey);
         if (allowance < BigInt(amountRaw)) {
-          const approveTx = await approveToken(fromToken.address, spender, BigInt(amountRaw), chainKey);
-          const approveId = `approve:${approveTx.hash}`;
+          if (!evmWalletClient) throw new Error('未连接 EVM 钱包');
+          const approveHash = await approveToken(fromToken.address, spender, BigInt(amountRaw), chainKey, evmWalletClient);
+          const approveId = `approve:${approveHash}`;
           upsertHistory({
             id: approveId,
             type: 'approve',
             status: 'pending',
-            hash: approveTx.hash,
+            hash: approveHash,
             title: `授权 ${fromToken.symbol}`,
             createdAt: nowTimeLabel(),
-            explorerUrl: buildExplorerUrl(chainKey, approveTx.hash),
+            explorerUrl: buildExplorerUrl(chainKey, approveHash),
           });
-          const receipt = await approveTx.wait();
-          updateHistoryStatus(approveId, receipt?.status === 1 ? 'success' : 'failed');
-          if (receipt?.status !== 1) throw new Error('授权失败');
+          const receipt = await waitForEvmReceipt(approveHash, chainKey);
+          updateHistoryStatus(approveId, receipt.status === 'success' ? 'success' : 'failed');
+          if (receipt.status !== 'success') throw new Error('授权失败');
         }
       }
 
@@ -1630,21 +1585,22 @@ export function SwapConsole() {
         feePercent: REQUIRED_OKX_FEE_PERCENT,
         fromTokenReferrerWalletAddress: referrerAddress,
       });
-      const tx = await sendSwapTransaction(swap.tx);
-      const swapId = `swap:${tx.hash}`;
+      if (!evmWalletClient) throw new Error('未连接 EVM 钱包');
+      const hash = await sendSwapTransaction(swap.tx, chainKey, evmWalletClient);
+      const swapId = `swap:${hash}`;
       upsertHistory({
         id: swapId,
         type: 'swap',
         status: 'pending',
-        hash: tx.hash,
+        hash,
         title: `${fromToken.symbol} -> ${toToken.symbol}`,
         createdAt: nowTimeLabel(),
-        explorerUrl: buildExplorerUrl(chainKey, tx.hash),
+        explorerUrl: buildExplorerUrl(chainKey, hash),
       });
       setConfirmOpen(false);
-      const receipt = await tx.wait();
-      updateHistoryStatus(swapId, receipt?.status === 1 ? 'success' : 'failed');
-      if (receipt?.status !== 1) throw new Error('交易失败');
+      const receipt = await waitForEvmReceipt(hash, chainKey);
+      updateHistoryStatus(swapId, receipt.status === 'success' ? 'success' : 'failed');
+      if (receipt.status !== 'success') throw new Error('交易失败');
       await refreshBalances();
       await fetchQuote();
     } catch (error) {
@@ -1656,6 +1612,7 @@ export function SwapConsole() {
     amountRaw,
     chainKey,
     configError,
+    evmWalletClient,
     fetchQuote,
     fromToken.address,
     fromToken.symbol,
@@ -1666,6 +1623,7 @@ export function SwapConsole() {
     referrerAddress,
     slippage,
     solanaReferrerAddress,
+    solanaWallet.signTransaction,
     toToken.address,
     toToken.symbol,
     updateHistoryStatus,
@@ -1693,9 +1651,8 @@ export function SwapConsole() {
               </IconButton>
               <button
                 type="button"
-                onClick={wallet.connected ? undefined : handleConnect}
-                disabled={wallet.connected}
-                className="flex h-9 min-w-0 items-center gap-2 rounded-lg border border-white/[0.08] bg-white/[0.045] px-2.5 text-sm text-white/72 transition hover:bg-white/[0.08] active:translate-y-px disabled:cursor-default disabled:hover:bg-white/[0.045] disabled:active:translate-y-0 sm:max-w-[220px] sm:px-3"
+                onClick={handleConnect}
+                className="flex h-9 min-w-0 items-center gap-2 rounded-lg border border-white/[0.08] bg-white/[0.045] px-2.5 text-sm text-white/72 transition hover:bg-white/[0.08] active:translate-y-px sm:max-w-[220px] sm:px-3"
                 title={wallet.address ? shortAddress(wallet.address) : (isSolanaSelected ? '连接 Solana' : '连接钱包')}
               >
                 <Wallet className="h-4 w-4 shrink-0" />

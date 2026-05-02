@@ -144,14 +144,16 @@ async function hmacSha256Base64(message: string, secretKey: string): Promise<str
   }
 
   const encoder = new TextEncoder();
+  const secretBytes = new Uint8Array(encoder.encode(secretKey));
+  const messageBytes = new Uint8Array(encoder.encode(message));
   const key = await globalThis.crypto.subtle.importKey(
     'raw',
-    encoder.encode(secretKey),
+    secretBytes,
     { name: 'HMAC', hash: 'SHA-256' },
     false,
     ['sign']
   );
-  const signature = await globalThis.crypto.subtle.sign('HMAC', key, encoder.encode(message));
+  const signature = await globalThis.crypto.subtle.sign('HMAC', key, messageBytes);
   return textToBase64(signature);
 }
 

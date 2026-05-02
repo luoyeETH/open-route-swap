@@ -1,12 +1,27 @@
 import {
-  BrowserProvider,
-  Contract,
   JsonRpcProvider,
-  TransactionResponse,
   formatUnits,
   isAddress,
   parseUnits,
 } from 'ethers';
+import {
+  getBalance,
+  readContract,
+  sendTransaction,
+  waitForTransactionReceipt,
+} from 'viem/actions';
+import {
+  createPublicClient,
+  encodeFunctionData,
+  getAddress,
+  http,
+  parseAbi,
+  type Address,
+  type Chain,
+  type Hash,
+  type TransactionReceipt,
+  type WalletClient,
+} from 'viem';
 import {
   AddressLookupTableAccount,
   Connection,
@@ -29,6 +44,8 @@ import {
   normalizeTokenAddress,
 } from '@/lib/chains';
 import type { OkxSolanaInstruction } from '@/lib/okx-client';
+
+export type EvmWalletClient = WalletClient;
 
 export type Eip1193Provider = {
   request: (request: { method: string; params?: unknown[] | Record<string, unknown> }) => Promise<unknown>;
@@ -76,9 +93,42 @@ const ERC20_ABI = [
   'function allowance(address owner, address spender) view returns (uint256)',
   'function approve(address spender, uint256 amount) returns (bool)',
 ] as const;
+const ERC20_VIEM_ABI = parseAbi(ERC20_ABI);
 
 const SOLANA_TOKEN_PROGRAM_ID = new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA');
 const SOLANA_TOKEN_2022_PROGRAM_ID = new PublicKey('TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb');
+
+function getViemChain(chainKey: ChainKey): Chain {
+  const chain = CHAIN_CONFIGS[chainKey];
+  if (!chain.chainId || !chain.chainIdHex || !chain.nativeCurrency) {
+    throw new Error('当前链不支持 EVM 钱包');
+  }
+  return {
+    id: chain.chainId,
+    name: chain.label,
+    nativeCurrency: chain.nativeCurrency,
+    rpcUrls: {
+      default: { http: chain.rpcUrls },
+    },
+    blockExplorers: chain.blockExplorerUrl
+      ? { default: { name: `${chain.label} Explorer`, url: chain.blockExplorerUrl } }
+      : undefined,
+  };
+}
+
+function getViemPublicClient(chainKey: ChainKey) {
+  const rpcUrl = CHAIN_CONFIGS[chainKey].rpcUrls[0];
+  if (!rpcUrl) throw new Error('当前链缺少 RPC');
+  return createPublicClient({
+    chain: getViemChain(chainKey),
+    transport: http(rpcUrl),
+  });
+}
+
+function toAddress(value: string, message = '地址无效'): Address {
+  if (!isAddress(value)) throw new Error(message);
+  return getAddress(value);
+}
 
 export function getInjectedProvider(): Eip1193Provider | null {
   if (typeof window === 'undefined') return null;
@@ -100,6 +150,31 @@ export function getSolanaConnection(): Connection {
   const rpcUrl = CHAIN_CONFIGS.solana.rpcUrls[0];
   if (!rpcUrl) throw new Error('Solana 缺少 RPC');
   return new Connection(rpcUrl, 'confirmed');
+}
+
+export function getWalletStateFromEvmAccount(params: {
+  address?: string;
+  chainId?: number;
+  connected: boolean;
+}): WalletState {
+  return {
+    address: params.address || null,
+    chainId: params.chainId ?? null,
+    connected: params.connected && Boolean(params.address),
+    kind: params.connected && params.address ? 'evm' : null,
+  };
+}
+
+export function getWalletStateFromSolanaAccount(params: {
+  address?: string;
+  connected: boolean;
+}): WalletState {
+  return {
+    address: params.address || null,
+    chainId: null,
+    connected: params.connected && Boolean(params.address),
+    kind: params.connected && params.address ? 'solana' : null,
+  };
 }
 
 function publicKeyToString(value: SolanaWalletProvider['publicKey']): string | null {
@@ -203,12 +278,6 @@ export async function switchToChain(chainKey: ChainKey): Promise<void> {
   }
 }
 
-function getBrowserProvider(): BrowserProvider {
-  const injected = getInjectedProvider();
-  if (!injected) throw new Error('未检测到浏览器钱包');
-  return new BrowserProvider(injected);
-}
-
 export async function readTokenBalance(token: TokenInfo, walletAddress: string, chainKey: ChainKey): Promise<TokenBalance> {
   if (isSolanaChain(chainKey)) {
     return readSolanaTokenBalance(token, walletAddress);
@@ -217,8 +286,10 @@ export async function readTokenBalance(token: TokenInfo, walletAddress: string, 
   const normalizedAddress = normalizeTokenAddress(token.address, chainKey);
   const decimals = token.decimals || 18;
   if (isNativeToken(normalizedAddress, chainKey)) {
-    const provider = getReadProvider(chainKey);
-    const raw = await provider.getBalance(walletAddress);
+    const provider = getViemPublicClient(chainKey);
+    const raw = await getBalance(provider, {
+      address: toAddress(walletAddress, '钱包地址无效'),
+    });
     return {
       token: { ...token, address: OKX_NATIVE_TOKEN_ADDRESS, decimals },
       raw: raw.toString(),
@@ -226,9 +297,13 @@ export async function readTokenBalance(token: TokenInfo, walletAddress: string, 
     };
   }
 
-  const provider = getReadProvider(chainKey);
-  const contract = new Contract(normalizedAddress, ERC20_ABI, provider);
-  const raw = await contract.balanceOf(walletAddress) as bigint;
+  const provider = getViemPublicClient(chainKey);
+  const raw = await readContract(provider, {
+    address: toAddress(normalizedAddress, '代币地址无效'),
+    abi: ERC20_VIEM_ABI,
+    functionName: 'balanceOf',
+    args: [toAddress(walletAddress, '钱包地址无效')],
+  }) as bigint;
   return {
     token: { ...token, address: normalizedAddress, decimals },
     raw: raw.toString(),
@@ -278,9 +353,12 @@ async function readSolanaTokenBalance(token: TokenInfo, walletAddress: string): 
 
 export async function readTokenDecimals(tokenAddress: string, chainKey: ChainKey): Promise<number> {
   if (isNativeToken(tokenAddress, chainKey)) return chainKey === 'solana' ? 9 : 18;
-  const provider = getReadProvider(chainKey);
-  const contract = new Contract(normalizeTokenAddress(tokenAddress, chainKey), ERC20_ABI, provider);
-  const decimals = await contract.decimals() as bigint | number;
+  const provider = getViemPublicClient(chainKey);
+  const decimals = await readContract(provider, {
+    address: toAddress(normalizeTokenAddress(tokenAddress, chainKey), '代币地址无效'),
+    abi: ERC20_VIEM_ABI,
+    functionName: 'decimals',
+  }) as bigint | number;
   return Number(decimals);
 }
 
@@ -292,23 +370,36 @@ export async function readAllowance(
 ): Promise<bigint> {
   if (isNativeToken(tokenAddress, chainKey)) return 0n;
   if (!isAddress(owner) || !isAddress(spender)) throw new Error('授权地址无效');
-  const provider = getReadProvider(chainKey);
-  const contract = new Contract(normalizeTokenAddress(tokenAddress, chainKey), ERC20_ABI, provider);
-  return await contract.allowance(owner, spender) as bigint;
+  const provider = getViemPublicClient(chainKey);
+  return await readContract(provider, {
+    address: toAddress(normalizeTokenAddress(tokenAddress, chainKey), '代币地址无效'),
+    abi: ERC20_VIEM_ABI,
+    functionName: 'allowance',
+    args: [toAddress(owner, '钱包地址无效'), toAddress(spender, '授权地址无效')],
+  }) as bigint;
 }
 
 export async function approveToken(
   tokenAddress: string,
   spender: string,
   amount: bigint,
-  chainKey: ChainKey
-): Promise<TransactionResponse> {
+  chainKey: ChainKey,
+  walletClient: EvmWalletClient
+): Promise<Hash> {
   if (isNativeToken(tokenAddress, chainKey)) throw new Error('原生代币不需要授权');
   if (!isAddress(spender)) throw new Error('OKX 授权地址无效');
-  const provider = getBrowserProvider();
-  const signer = await provider.getSigner();
-  const contract = new Contract(normalizeTokenAddress(tokenAddress, chainKey), ERC20_ABI, signer);
-  return await contract.approve(spender, amount) as TransactionResponse;
+  if (!walletClient.account) throw new Error('未连接 EVM 钱包');
+  return await sendTransaction(walletClient, {
+    account: walletClient.account,
+    chain: getViemChain(chainKey),
+    to: toAddress(normalizeTokenAddress(tokenAddress, chainKey), '代币地址无效'),
+    data: encodeFunctionData({
+      abi: ERC20_VIEM_ABI,
+      functionName: 'approve',
+      args: [toAddress(spender, 'OKX 授权地址无效'), amount],
+    }),
+    value: 0n,
+  });
 }
 
 export async function sendSwapTransaction(tx: {
@@ -316,15 +407,21 @@ export async function sendSwapTransaction(tx: {
   data: string;
   value?: string | null;
   gas?: string | null;
-}): Promise<TransactionResponse> {
-  const provider = getBrowserProvider();
-  const signer = await provider.getSigner();
-  return await signer.sendTransaction({
-    to: tx.to,
-    data: tx.data,
+}, chainKey: ChainKey, walletClient: EvmWalletClient): Promise<Hash> {
+  if (!walletClient.account) throw new Error('未连接 EVM 钱包');
+  return await sendTransaction(walletClient, {
+    account: walletClient.account,
+    chain: getViemChain(chainKey),
+    to: toAddress(tx.to, '交易目标地址无效'),
+    data: tx.data as `0x${string}`,
     value: BigInt(tx.value || '0'),
-    gasLimit: tx.gas ? BigInt(tx.gas) : undefined,
+    gas: tx.gas ? BigInt(tx.gas) : undefined,
   });
+}
+
+export async function waitForEvmReceipt(hash: Hash, chainKey: ChainKey): Promise<TransactionReceipt> {
+  const provider = getViemPublicClient(chainKey);
+  return await waitForTransactionReceipt(provider, { hash });
 }
 
 function okxInstructionToSolanaInstruction(instruction: OkxSolanaInstruction): TransactionInstruction {
@@ -352,10 +449,10 @@ export async function sendSolanaSwapInstructions(params: {
   instructions: OkxSolanaInstruction[];
   addressLookupTableAccounts: string[];
   walletAddress: string;
+  signTransaction?: SolanaWalletProvider['signTransaction'];
 }): Promise<string> {
-  const wallet = getInjectedSolanaProvider();
-  if (!wallet) throw new Error('未检测到 Solana 钱包');
-  if (!wallet.signTransaction) throw new Error('Solana 钱包不支持 signTransaction');
+  const signTransaction = params.signTransaction ?? getInjectedSolanaProvider()?.signTransaction;
+  if (!signTransaction) throw new Error('Solana 钱包不支持 signTransaction');
 
   const connection = getSolanaConnection();
   const payerKey = new PublicKey(params.walletAddress);
@@ -369,7 +466,7 @@ export async function sendSolanaSwapInstructions(params: {
     instructions: params.instructions.map(okxInstructionToSolanaInstruction),
   }).compileToV0Message(lookupTables);
   const transaction = new VersionedTransaction(message);
-  const signedTransaction = await wallet.signTransaction(transaction);
+  const signedTransaction = await signTransaction(transaction);
 
   const simulation = await connection.simulateTransaction(signedTransaction, { sigVerify: true });
   if (simulation.value.err) {
