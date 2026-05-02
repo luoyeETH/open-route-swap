@@ -726,6 +726,7 @@ export function SwapConsole() {
   const [credentialMode, setCredentialMode] = useState<CredentialProvider>('none');
   const [credentials, setCredentials] = useState<OkxCredentials>({ apiKey: '', secretKey: '', passphrase: '' });
   const [signerProxyUrl, setSignerProxyUrl] = useState(process.env.NEXT_PUBLIC_OKX_SIGNER_PROXY_URL?.trim() || '');
+  const [manuallyDisconnectedKind, setManuallyDisconnectedKind] = useState<WalletState['kind']>(null);
 
   const quoteRequestIdRef = useRef(0);
   const balanceRequestIdRef = useRef(0);
@@ -864,6 +865,7 @@ export function SwapConsole() {
   }, [envDemoCredentials]);
 
   useEffect(() => {
+    if (manuallyDisconnectedKind === selectedWalletKind) return;
     let mounted = true;
     const readState = chainKey === 'solana' ? getSolanaWalletState() : getWalletState();
     readState
@@ -874,7 +876,7 @@ export function SwapConsole() {
     return () => {
       mounted = false;
     };
-  }, [chainKey, selectedWalletKind, wallet.kind]);
+  }, [chainKey, manuallyDisconnectedKind, selectedWalletKind, wallet.kind]);
 
   useEffect(() => {
     const provider = getInjectedProvider();
@@ -882,6 +884,7 @@ export function SwapConsole() {
     const handleAccountsChanged = (accountsValue: unknown) => {
       if (chainKey === 'solana') return;
       const accounts = Array.isArray(accountsValue) ? accountsValue : [];
+      if (manuallyDisconnectedKind === 'evm' && typeof accounts[0] === 'string') return;
       setWallet((current) => ({
         ...current,
         address: typeof accounts[0] === 'string' ? accounts[0] : null,
@@ -903,13 +906,14 @@ export function SwapConsole() {
       provider.removeListener?.('accountsChanged', handleAccountsChanged);
       provider.removeListener?.('chainChanged', handleChainChanged);
     };
-  }, [chainKey]);
+  }, [chainKey, manuallyDisconnectedKind]);
 
   useEffect(() => {
     const provider = getInjectedSolanaProvider();
     if (!provider?.on) return;
     const handleConnect = (publicKeyValue: unknown) => {
       if (chainKey !== 'solana') return;
+      if (manuallyDisconnectedKind === 'solana') return;
       const address = publicKeyValue && typeof publicKeyValue === 'object' && 'toString' in publicKeyValue
         ? publicKeyValue.toString()
         : typeof publicKeyValue === 'string'
@@ -935,7 +939,7 @@ export function SwapConsole() {
       provider.removeListener?.('disconnect', handleDisconnect);
       provider.removeListener?.('accountChanged', handleConnect);
     };
-  }, [chainKey]);
+  }, [chainKey, manuallyDisconnectedKind]);
 
   useEffect(() => {
     const defaultFromToken = getDefaultFromToken(chainKey);
@@ -1053,6 +1057,7 @@ export function SwapConsole() {
 
   const handleConnect = useCallback(async () => {
     setExecutionError(null);
+    setManuallyDisconnectedKind(null);
     try {
       setWallet(isSolanaSelected ? await connectSolanaWallet() : await connectWallet());
     } catch (error) {
@@ -1070,10 +1075,14 @@ export function SwapConsole() {
     }
   }, [chainKey]);
 
-  const handleDisconnect = useCallback(() => {
+  const handleDisconnect = useCallback(async () => {
+    setManuallyDisconnectedKind(selectedWalletKind);
+    if (selectedWalletKind === 'solana') {
+      await getInjectedSolanaProvider()?.disconnect?.().catch(() => undefined);
+    }
     setWallet(emptyWalletState());
     setBalances({});
-  }, []);
+  }, [selectedWalletKind]);
 
   const handleMax = useCallback(() => {
     if (!fromBalance) return;
