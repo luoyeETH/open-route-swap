@@ -1634,9 +1634,9 @@ export function SwapConsole() {
 
   return (
     <main className="min-h-[100dvh] overflow-x-hidden px-3 py-4 sm:px-5 sm:py-6">
-      <div className="mx-auto grid w-full max-w-full gap-4 lg:max-w-[1080px] lg:grid-cols-[520px_1fr]">
-        <section className="space-y-3">
-          <header className="flex flex-wrap items-center justify-between gap-2 sm:gap-3">
+      <div className="mx-auto w-full max-w-full space-y-4 lg:max-w-[1080px]">
+        <header className="soft-panel rounded-3xl p-3 sm:p-4">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex min-w-0 items-center gap-3">
               <SwapLogo />
               <div className="min-w-0">
@@ -1644,7 +1644,7 @@ export function SwapConsole() {
                 <div className="mono-num mt-0.5 text-xs text-white/40">fee {REQUIRED_OKX_FEE_PERCENT}%</div>
               </div>
             </div>
-            <div className="flex min-w-0 flex-1 flex-wrap items-center justify-end gap-1.5 sm:gap-2">
+            <div className="flex min-w-0 flex-wrap items-center justify-start gap-1.5 sm:justify-end sm:gap-2">
               <ChainDropdown value={chainKey} onChange={(key) => setChainKey(key)} />
               <IconButton title="OKX 设置" onClick={() => setSettingsOpen(true)}>
                 <Settings className="h-4 w-4" />
@@ -1652,11 +1652,11 @@ export function SwapConsole() {
               <button
                 type="button"
                 onClick={handleConnect}
-                className="flex h-9 min-w-0 items-center gap-2 rounded-lg border border-white/[0.08] bg-white/[0.045] px-2.5 text-sm text-white/72 transition hover:bg-white/[0.08] active:translate-y-px sm:max-w-[220px] sm:px-3"
+                className="flex h-9 min-w-0 max-w-[210px] items-center gap-2 rounded-lg border border-white/[0.08] bg-white/[0.045] px-2.5 text-sm text-white/72 transition hover:bg-white/[0.08] active:translate-y-px sm:max-w-[240px] sm:px-3"
                 title={wallet.address ? shortAddress(wallet.address) : (isSolanaSelected ? '连接 Solana' : '连接钱包')}
               >
                 <Wallet className="h-4 w-4 shrink-0" />
-                <span className="hidden truncate sm:inline">{wallet.address ? shortAddress(wallet.address) : (isSolanaSelected ? '连接 Solana' : '连接钱包')}</span>
+                <span className="truncate">{wallet.address ? shortAddress(wallet.address) : (isSolanaSelected ? '连接 Solana' : '连接钱包')}</span>
               </button>
               {wallet.connected ? (
                 <IconButton title="断开钱包" onClick={handleDisconnect}>
@@ -1664,188 +1664,192 @@ export function SwapConsole() {
                 </IconButton>
               ) : null}
             </div>
-          </header>
+          </div>
+        </header>
 
-          <div className="soft-panel rounded-3xl p-3">
-            <div className="mb-3 flex items-center justify-between gap-2 px-1 sm:gap-3">
-              <div className="flex min-w-0 items-center gap-2 text-xs text-white/45">
-                <span className={`h-2 w-2 rounded-full ${okxClient.isReady ? 'bg-teal-300' : 'bg-white/22'}`} />
-                <span className="truncate">OKX {okxClient.isReady ? '已设置' : '未设置'}</span>
-              </div>
-              <div className="flex shrink-0 items-center gap-2">
-                <IconButton title="粘贴合约" onClick={handlePasteContract} disabled={pasteLoading}>
-                  {pasteLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <ClipboardPaste className="h-4 w-4" />}
-                </IconButton>
-                <IconButton title="刷新报价" onClick={fetchQuote} disabled={quoteLoading}>
-                  <RefreshCw className={`h-4 w-4 ${quoteLoading ? 'animate-spin' : ''}`} />
-                </IconButton>
-                <IconButton title="查看 K 线" onClick={() => setKlineOpen(true)}>
-                  <ChartCandlestick className="h-4 w-4" />
-                </IconButton>
-              </div>
-            </div>
-
-            <div className="space-y-2">
-              <TokenAmountPanel
-                label="支付"
-                token={fromToken}
-                value={amount}
-                onValueChange={setAmount}
-                onTokenClick={() => setActiveTokenSide('from')}
-                balance={fromBalance}
-                onMax={handleMax}
-              />
-
-              <div className="flex justify-center">
-                <button
-                  type="button"
-                  onClick={handleFlip}
-                  className="-my-1 flex h-10 w-10 items-center justify-center rounded-xl border border-white/[0.08] bg-[#11171d] text-white/62 shadow-inset transition hover:bg-white/[0.08] hover:text-white active:translate-y-px"
-                  title="翻转"
-                >
-                  <ArrowDownUp className="h-4 w-4" />
-                </button>
+        <div className="grid gap-4 lg:grid-cols-[520px_1fr] lg:items-start">
+          <section>
+            <div className="soft-panel rounded-3xl p-3">
+              <div className="mb-3 flex items-center justify-between gap-2 px-1 sm:gap-3">
+                <div className="flex min-w-0 items-center gap-2 text-xs text-white/45">
+                  <span className={`h-2 w-2 rounded-full ${okxClient.isReady ? 'bg-teal-300' : 'bg-white/22'}`} />
+                  <span className="truncate">OKX {okxClient.isReady ? '已设置' : '未设置'}</span>
+                </div>
+                <div className="flex shrink-0 items-center gap-2">
+                  <IconButton title="粘贴合约" onClick={handlePasteContract} disabled={pasteLoading}>
+                    {pasteLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <ClipboardPaste className="h-4 w-4" />}
+                  </IconButton>
+                  <IconButton title="刷新报价" onClick={fetchQuote} disabled={quoteLoading}>
+                    <RefreshCw className={`h-4 w-4 ${quoteLoading ? 'animate-spin' : ''}`} />
+                  </IconButton>
+                  <IconButton title="查看 K 线" onClick={() => setKlineOpen(true)}>
+                    <ChartCandlestick className="h-4 w-4" />
+                  </IconButton>
+                </div>
               </div>
 
-              <TokenAmountPanel
-                label="收到"
-                token={toToken}
-                value={outputAmount}
-                disabled
-                onTokenClick={() => setActiveTokenSide('to')}
-                balance={toBalance}
-                quoteValue={quoteLoading ? '报价中' : quoteUpdatedAt ? `更新 ${quoteUpdatedAt}` : ''}
-              />
-            </div>
+              <div className="space-y-2">
+                <TokenAmountPanel
+                  label="支付"
+                  token={fromToken}
+                  value={amount}
+                  onValueChange={setAmount}
+                  onTokenClick={() => setActiveTokenSide('from')}
+                  balance={fromBalance}
+                  onMax={handleMax}
+                />
 
-            <div className="mt-3">
-              <div className="flex items-center gap-1 rounded-xl border border-white/[0.08] bg-white/[0.035] p-1">
-                {SLIPPAGE_PRESETS.map((value) => (
+                <div className="flex justify-center">
                   <button
                     type="button"
-                    key={value}
-                    onClick={() => setSlippage(value)}
-                    className={`mono-num h-8 flex-1 rounded-lg text-xs transition active:translate-y-px ${
-                      slippage === value
-                        ? 'border border-white/[0.12] bg-[#374151] text-white shadow-inset'
-                        : 'border border-transparent text-white/45 hover:bg-[#242c35] hover:text-white/72'
-                    }`}
+                    onClick={handleFlip}
+                    className="-my-1 flex h-10 w-10 items-center justify-center rounded-xl border border-white/[0.08] bg-[#11171d] text-white/62 shadow-inset transition hover:bg-white/[0.08] hover:text-white active:translate-y-px"
+                    title="翻转"
                   >
-                    {value}%
+                    <ArrowDownUp className="h-4 w-4" />
                   </button>
-                ))}
-                <input
-                  value={slippage}
-                  onChange={(event) => setSlippage(normalizeDecimalInput(event.target.value))}
-                  className="mono-num h-8 w-14 sm:w-16 rounded-lg border border-white/[0.06] bg-white/[0.04] px-2 text-center text-xs text-white outline-none focus:border-teal-300/35"
+                </div>
+
+                <TokenAmountPanel
+                  label="收到"
+                  token={toToken}
+                  value={outputAmount}
+                  disabled
+                  onTokenClick={() => setActiveTokenSide('to')}
+                  balance={toBalance}
+                  quoteValue={quoteLoading ? '报价中' : quoteUpdatedAt ? `更新 ${quoteUpdatedAt}` : ''}
                 />
               </div>
-            </div>
 
-            {(configError || quoteError || executionError || highImpact || quote?.isHoneyPot) ? (
-              <div className="mt-3 flex gap-2 rounded-xl border border-amber-200/16 bg-amber-200/[0.055] px-3 py-2 text-xs text-amber-100/82">
-                <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-                <span className="min-w-0 break-words">
-                  {configError || quoteError || executionError || (quote?.isHoneyPot ? '风险代币' : '价格影响偏高')}
-                </span>
+              <div className="mt-3">
+                <div className="flex items-center gap-1 rounded-xl border border-white/[0.08] bg-white/[0.035] p-1">
+                  {SLIPPAGE_PRESETS.map((value) => (
+                    <button
+                      type="button"
+                      key={value}
+                      onClick={() => setSlippage(value)}
+                      className={`mono-num h-8 flex-1 rounded-lg text-xs transition active:translate-y-px ${
+                        slippage === value
+                          ? 'border border-white/[0.12] bg-[#374151] text-white shadow-inset'
+                          : 'border border-transparent text-white/45 hover:bg-[#242c35] hover:text-white/72'
+                      }`}
+                    >
+                      {value}%
+                    </button>
+                  ))}
+                  <input
+                    value={slippage}
+                    onChange={(event) => setSlippage(normalizeDecimalInput(event.target.value))}
+                    className="mono-num h-8 w-14 rounded-lg border border-white/[0.06] bg-white/[0.04] px-2 text-center text-xs text-white outline-none focus:border-teal-300/35 sm:w-16"
+                  />
+                </div>
               </div>
-            ) : null}
 
-            <button
-              type="button"
-              onClick={handlePrimaryAction}
-              disabled={executionLoading || (primaryIssue != null && !actionableIssues.has(primaryIssue))}
-              className="button-primary mt-3 flex h-11 w-full items-center justify-center gap-2 rounded-2xl text-sm font-bold transition active:translate-y-px disabled:opacity-50 sm:h-12"
-            >
-              {executionLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-              {executionLoading ? '处理中' : primaryIssue || 'Swap'}
-            </button>
-          </div>
-        </section>
+              {(configError || quoteError || executionError || highImpact || quote?.isHoneyPot) ? (
+                <div className="mt-3 flex gap-2 rounded-xl border border-amber-200/16 bg-amber-200/[0.055] px-3 py-2 text-xs text-amber-100/82">
+                  <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+                  <span className="min-w-0 break-words">
+                    {configError || quoteError || executionError || (quote?.isHoneyPot ? '风险代币' : '价格影响偏高')}
+                  </span>
+                </div>
+              ) : null}
 
-        <aside className="space-y-3 lg:sticky lg:top-4">
-          <section className="soft-panel rounded-3xl p-4">
-            <div className="mb-3 flex items-center justify-between">
-              <h2 className="text-sm font-semibold">报价</h2>
-              <span className="mono-num text-xs text-white/36">{quoteUpdatedAt || '--'}</span>
-            </div>
-            {quoteLoading ? (
-              <div className="space-y-2">
-                <div className="skeleton h-9 rounded-xl" />
-                <div className="skeleton h-9 rounded-xl" />
-                <div className="skeleton h-9 rounded-xl" />
-              </div>
-            ) : quote ? (
-              <div className="divide-y divide-white/[0.07] text-sm">
-                <InfoRow label="预计收到" value={`${formatTokenUnits(quote.toTokenAmount, toToken.decimals, 8)} ${toToken.symbol}`} />
-                <InfoRow label="价格影响" value={formatPercent(quote.priceImpactPercent)} danger={highImpact} />
-                <InfoRow label="Gas 估算" value={quote.estimateGasFee ? `${formatNumber(quote.estimateGasFee, 6)} ${nativeGasSymbol}` : '--'} />
-                <InfoRow label="路径" value={routeLabel} />
-                <InfoRow label="平台费" value={`${REQUIRED_OKX_FEE_PERCENT}%`} />
-              </div>
-            ) : (
-              <div className="rounded-2xl border border-white/[0.08] bg-white/[0.035] px-3 py-8 text-center text-sm text-white/40">
-                暂无报价
-              </div>
-            )}
-          </section>
-
-          <section className="soft-panel rounded-3xl p-4">
-            <div className="mb-3 flex items-center justify-between">
-              <h2 className="text-sm font-semibold">余额</h2>
-              <button type="button" onClick={refreshBalances} className="text-xs text-teal-100/80 hover:text-teal-100">
-                刷新
+              <button
+                type="button"
+                onClick={handlePrimaryAction}
+                disabled={executionLoading || (primaryIssue != null && !actionableIssues.has(primaryIssue))}
+                className="button-primary mt-3 flex h-11 w-full items-center justify-center gap-2 rounded-2xl text-sm font-bold transition active:translate-y-px disabled:opacity-50 sm:h-12"
+              >
+                {executionLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+                {executionLoading ? '处理中' : primaryIssue || 'Swap'}
               </button>
             </div>
-            <div className="space-y-2">
-              {mergeTokenLists([fromToken, toToken, ...commonTokens.slice(0, 4)]).slice(0, 6).map((token) => {
-                const balance = balances[tokenStorageKey(token)];
-                return (
-                  <div key={tokenStorageKey(token)} className="flex items-center gap-3 rounded-xl border border-white/[0.06] bg-white/[0.03] px-3 py-2">
-                    <TokenAvatar token={token} size={26} />
-                    <div className="min-w-0 flex-1">
-                      <div className="truncate text-sm font-medium">{token.symbol}</div>
-                      <div className="truncate text-xs text-white/34">{shortAddress(token.address)}</div>
-                    </div>
-                    <div className="mono-num text-right text-sm text-white/72">
-                      {balance ? formatNumber(balance.formatted, 6) : '--'}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
           </section>
 
-          <section className="soft-panel rounded-3xl p-4">
-            <h2 className="mb-3 text-sm font-semibold">记录</h2>
-            {history.length ? (
+          <aside className="space-y-3 lg:sticky lg:top-4">
+            <section className="soft-panel rounded-3xl p-4">
+              <div className="mb-3 flex items-center justify-between">
+                <h2 className="text-sm font-semibold">报价</h2>
+                <span className="mono-num text-xs text-white/36">{quoteUpdatedAt || '--'}</span>
+              </div>
+              {quoteLoading ? (
+                <div className="space-y-2">
+                  <div className="skeleton h-9 rounded-xl" />
+                  <div className="skeleton h-9 rounded-xl" />
+                  <div className="skeleton h-9 rounded-xl" />
+                </div>
+              ) : quote ? (
+                <div className="divide-y divide-white/[0.07] text-sm">
+                  <InfoRow label="预计收到" value={`${formatTokenUnits(quote.toTokenAmount, toToken.decimals, 8)} ${toToken.symbol}`} />
+                  <InfoRow label="价格影响" value={formatPercent(quote.priceImpactPercent)} danger={highImpact} />
+                  <InfoRow label="Gas 估算" value={quote.estimateGasFee ? `${formatNumber(quote.estimateGasFee, 6)} ${nativeGasSymbol}` : '--'} />
+                  <InfoRow label="路径" value={routeLabel} />
+                  <InfoRow label="平台费" value={`${REQUIRED_OKX_FEE_PERCENT}%`} />
+                </div>
+              ) : (
+                <div className="rounded-2xl border border-white/[0.08] bg-white/[0.035] px-3 py-8 text-center text-sm text-white/40">
+                  暂无报价
+                </div>
+              )}
+            </section>
+
+            <section className="soft-panel rounded-3xl p-4">
+              <div className="mb-3 flex items-center justify-between">
+                <h2 className="text-sm font-semibold">余额</h2>
+                <button type="button" onClick={refreshBalances} className="text-xs text-teal-100/80 hover:text-teal-100">
+                  刷新
+                </button>
+              </div>
               <div className="space-y-2">
-                {history.map((item) => (
-                  <a
-                    key={item.id}
-                    href={item.explorerUrl}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="flex items-center gap-3 rounded-xl border border-white/[0.06] bg-white/[0.03] px-3 py-2 transition hover:bg-white/[0.055]"
-                  >
-                    <span className={`h-2 w-2 rounded-full ${
-                      item.status === 'success' ? 'bg-teal-300' : item.status === 'failed' ? 'bg-rose-300' : 'bg-amber-200'
-                    }`} />
-                    <span className="min-w-0 flex-1">
-                      <span className="block truncate text-sm">{item.title}</span>
-                      <span className="mono-num block text-xs text-white/34">{item.createdAt} · {shortAddress(item.hash)}</span>
-                    </span>
-                    <ExternalLink className="h-4 w-4 text-white/34" />
-                  </a>
-                ))}
+                {mergeTokenLists([fromToken, toToken, ...commonTokens.slice(0, 4)]).slice(0, 6).map((token) => {
+                  const balance = balances[tokenStorageKey(token)];
+                  return (
+                    <div key={tokenStorageKey(token)} className="flex items-center gap-3 rounded-xl border border-white/[0.06] bg-white/[0.03] px-3 py-2">
+                      <TokenAvatar token={token} size={26} />
+                      <div className="min-w-0 flex-1">
+                        <div className="truncate text-sm font-medium">{token.symbol}</div>
+                        <div className="truncate text-xs text-white/34">{shortAddress(token.address)}</div>
+                      </div>
+                      <div className="mono-num text-right text-sm text-white/72">
+                        {balance ? formatNumber(balance.formatted, 6) : '--'}
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
-            ) : (
-              <div className="rounded-2xl border border-white/[0.08] bg-white/[0.035] px-3 py-8 text-center text-sm text-white/40">
-                暂无记录
-              </div>
-            )}
-          </section>
-        </aside>
+            </section>
+
+            <section className="soft-panel rounded-3xl p-4">
+              <h2 className="mb-3 text-sm font-semibold">记录</h2>
+              {history.length ? (
+                <div className="space-y-2">
+                  {history.map((item) => (
+                    <a
+                      key={item.id}
+                      href={item.explorerUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="flex items-center gap-3 rounded-xl border border-white/[0.06] bg-white/[0.03] px-3 py-2 transition hover:bg-white/[0.055]"
+                    >
+                      <span className={`h-2 w-2 rounded-full ${
+                        item.status === 'success' ? 'bg-teal-300' : item.status === 'failed' ? 'bg-rose-300' : 'bg-amber-200'
+                      }`} />
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-sm">{item.title}</span>
+                        <span className="mono-num block text-xs text-white/34">{item.createdAt} · {shortAddress(item.hash)}</span>
+                      </span>
+                      <ExternalLink className="h-4 w-4 text-white/34" />
+                    </a>
+                  ))}
+                </div>
+              ) : (
+                <div className="rounded-2xl border border-white/[0.08] bg-white/[0.035] px-3 py-8 text-center text-sm text-white/40">
+                  暂无记录
+                </div>
+              )}
+            </section>
+          </aside>
+        </div>
       </div>
 
       <TokenSelectorSheet
