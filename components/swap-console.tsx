@@ -9,6 +9,7 @@ import {
   ChevronDown,
   ExternalLink,
   Loader2,
+  Power,
   RefreshCw,
   Search,
   Settings,
@@ -1295,13 +1296,19 @@ export function SwapConsole() {
                   <RefreshCw className={`h-4 w-4 ${quoteLoading ? 'animate-spin' : ''}`} />
                 </IconButton>
                 <button
-                type="button"
-              onClick={wallet.connected ? handleDisconnect : handleConnect}
-                className="flex h-9 max-w-[220px] items-center gap-2 rounded-lg border border-white/[0.08] bg-white/[0.045] px-3 text-sm text-white/72 transition hover:bg-white/[0.08] active:translate-y-px"
-              >
-                <Wallet className="h-4 w-4 shrink-0" />
-                <span className="truncate">{wallet.address ? shortAddress(wallet.address) : (isSolanaSelected ? '连接 Solana' : '连接钱包')}</span>
-              </button>
+                  type="button"
+                  onClick={wallet.connected ? undefined : handleConnect}
+                  disabled={wallet.connected}
+                  className="flex h-9 max-w-[220px] items-center gap-2 rounded-lg border border-white/[0.08] bg-white/[0.045] px-3 text-sm text-white/72 transition hover:bg-white/[0.08] active:translate-y-px disabled:cursor-default disabled:hover:bg-white/[0.045] disabled:active:translate-y-0"
+                >
+                  <Wallet className="h-4 w-4 shrink-0" />
+                  <span className="truncate">{wallet.address ? shortAddress(wallet.address) : (isSolanaSelected ? '连接 Solana' : '连接钱包')}</span>
+                </button>
+                {wallet.connected ? (
+                  <IconButton title="断开钱包" onClick={handleDisconnect}>
+                    <Power className="h-4 w-4" />
+                  </IconButton>
+                ) : null}
               </div>
             </div>
 
