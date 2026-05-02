@@ -57,17 +57,6 @@ select {
   color-scheme: dark;
 }
 
-.chain-select,
-.chain-select option {
-  background-color: #151c23;
-  color: rgba(255, 255, 255, 0.93);
-}
-
-.chain-select option:checked {
-  background-color: #374151;
-  color: #ffffff;
-}
-
 ::-webkit-scrollbar {
   width: 10px;
   height: 10px;

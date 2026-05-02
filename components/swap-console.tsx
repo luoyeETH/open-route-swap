@@ -120,26 +120,32 @@ function SwapLogo({ size = 36 }: { size?: number }) {
       aria-label="Open Route Swap"
       className="shrink-0"
     >
-      <rect width="40" height="40" rx="10" fill="#151c23" />
+      <defs>
+        <linearGradient id="logo-bg" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor="#1a2230" />
+          <stop offset="100%" stopColor="#111820" />
+        </linearGradient>
+      </defs>
+      <rect width="40" height="40" rx="8" fill="url(#logo-bg)" />
       <path
-        d="M11 15.8H27.4L23.9 12.3"
+        d="M11 16H27L24 13"
         fill="none"
         stroke="#F8FAFC"
-        strokeWidth="2.8"
+        strokeWidth="2.5"
         strokeLinecap="round"
         strokeLinejoin="round"
       />
       <path
-        d="M29 24.2H12.6L16.1 27.7"
+        d="M29 24H13L16 27"
         fill="none"
         stroke="#9CA3AF"
-        strokeWidth="2.8"
+        strokeWidth="2.5"
         strokeLinecap="round"
         strokeLinejoin="round"
       />
-      <circle cx="29" cy="15.8" r="3.3" fill="#2DD4BF" />
-      <circle cx="11" cy="24.2" r="3.3" fill="#6B7280" />
-      <rect x="0.75" y="0.75" width="38.5" height="38.5" rx="9.25" fill="none" stroke="rgba(255,255,255,0.12)" strokeWidth="1.5" />
+      <circle cx="29" cy="16" r="3" fill="#2DD4BF" />
+      <circle cx="11" cy="24" r="3" fill="#6B7280" />
+      <rect x="0.75" y="0.75" width="38.5" height="38.5" rx="7.25" fill="none" stroke="rgba(255,255,255,0.1)" strokeWidth="1.5" />
     </svg>
   );
 }
@@ -181,6 +187,69 @@ function IconButton({
     >
       {children}
     </button>
+  );
+}
+
+function ChainDropdown({
+  value,
+  onChange,
+}: {
+  value: ChainKey;
+  onChange: (key: ChainKey) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const handle = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener('mousedown', handle);
+    return () => document.removeEventListener('mousedown', handle);
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    const handle = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOpen(false);
+    };
+    document.addEventListener('keydown', handle);
+    return () => document.removeEventListener('keydown', handle);
+  }, [open]);
+
+  return (
+    <div ref={ref} className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="flex h-9 max-w-[170px] items-center gap-1.5 rounded-lg border border-white/[0.12] bg-[#151c23] px-2.5 text-sm font-medium text-white outline-none transition hover:bg-[#1a222b]"
+        title="选择链"
+      >
+        <span className="truncate">{CHAIN_CONFIGS[value].label}</span>
+        <ChevronDown className={`h-3.5 w-3.5 shrink-0 text-white/50 transition-transform ${open ? 'rotate-180' : ''}`} />
+      </button>
+      {open && (
+        <div className="absolute right-0 top-full z-50 mt-1 min-w-[160px] overflow-hidden rounded-xl border border-white/[0.1] bg-[#151c23] py-1 shadow-lg shadow-black/40">
+          {SELECTABLE_CHAIN_KEYS.map((key) => (
+            <button
+              key={key}
+              type="button"
+              onClick={() => {
+                onChange(key);
+                setOpen(false);
+              }}
+              className={`flex w-full items-center gap-2 px-3 py-2 text-left text-sm transition hover:bg-white/[0.06] ${
+                key === value ? 'text-teal-300' : 'text-white/80'
+              }`}
+            >
+              {key === value && <Check className="h-3.5 w-3.5 shrink-0 text-teal-300" />}
+              <span className={key === value ? '' : 'pl-[1.375rem]'}>{CHAIN_CONFIGS[key].label}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -1091,18 +1160,7 @@ export function SwapConsole() {
               </div>
             </div>
             <div className="flex items-center gap-2">
-              <select
-                value={chainKey}
-                onChange={(event) => setChainKey(event.target.value as ChainKey)}
-                className="chain-select h-9 max-w-[170px] rounded-lg border border-white/[0.12] bg-[#151c23] px-2.5 text-sm font-medium text-white outline-none transition hover:bg-[#1a222b] focus:border-teal-300/35"
-                title="选择链"
-              >
-                {SELECTABLE_CHAIN_KEYS.map((key) => (
-                  <option key={key} value={key} className="bg-[#151c23] text-white">
-                    {CHAIN_CONFIGS[key].label}
-                  </option>
-                ))}
-              </select>
+              <ChainDropdown value={chainKey} onChange={(key) => setChainKey(key)} />
               <IconButton title="OKX 设置" onClick={() => setSettingsOpen(true)}>
                 <Settings className="h-4 w-4" />
               </IconButton>
@@ -1115,7 +1173,11 @@ export function SwapConsole() {
                 <span className={`h-2 w-2 rounded-full ${okxClient.isReady ? 'bg-teal-300' : 'bg-white/22'}`} />
                 OKX {okxClient.isReady ? '已设置' : '未设置'}
               </div>
-              <button
+              <div className="flex items-center gap-2">
+                <IconButton title="刷新报价" onClick={fetchQuote} disabled={quoteLoading}>
+                  <RefreshCw className={`h-4 w-4 ${quoteLoading ? 'animate-spin' : ''}`} />
+                </IconButton>
+                <button
                 type="button"
                 onClick={wallet.connected ? handleDisconnect : handleConnect}
                 className="flex h-9 max-w-[220px] items-center gap-2 rounded-lg border border-white/[0.08] bg-white/[0.045] px-3 text-sm text-white/72 transition hover:bg-white/[0.08] active:translate-y-px"
@@ -1123,6 +1185,7 @@ export function SwapConsole() {
                 <Wallet className="h-4 w-4 shrink-0" />
                 <span className="truncate">{wallet.address ? shortAddress(wallet.address) : '连接钱包'}</span>
               </button>
+              </div>
             </div>
 
             <div className="space-y-2">
@@ -1158,7 +1221,7 @@ export function SwapConsole() {
               />
             </div>
 
-            <div className="mt-3 grid grid-cols-[1fr_auto] gap-2">
+            <div className="mt-3">
               <div className="flex items-center gap-1 rounded-xl border border-white/[0.08] bg-white/[0.035] p-1">
                 {SLIPPAGE_PRESETS.map((value) => (
                   <button
@@ -1180,9 +1243,6 @@ export function SwapConsole() {
                   className="mono-num h-8 w-16 rounded-lg border border-white/[0.06] bg-white/[0.04] px-2 text-center text-xs text-white outline-none focus:border-teal-300/35"
                 />
               </div>
-              <IconButton title="刷新报价" onClick={fetchQuote} disabled={quoteLoading}>
-                <RefreshCw className={`h-4 w-4 ${quoteLoading ? 'animate-spin' : ''}`} />
-              </IconButton>
             </div>
 
             {(configError || quoteError || executionError || highImpact || quote?.isHoneyPot) ? (
