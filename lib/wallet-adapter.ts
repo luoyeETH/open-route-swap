@@ -95,9 +95,6 @@ const ERC20_ABI = [
 ] as const;
 const ERC20_VIEM_ABI = parseAbi(ERC20_ABI);
 
-const SOLANA_TOKEN_PROGRAM_ID = new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA');
-const SOLANA_TOKEN_2022_PROGRAM_ID = new PublicKey('TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb');
-
 function getViemChain(chainKey: ChainKey): Chain {
   const chain = CHAIN_CONFIGS[chainKey];
   if (!chain.chainId || !chain.chainIdHex || !chain.nativeCurrency) {
@@ -326,22 +323,16 @@ async function readSolanaTokenBalance(token: TokenInfo, walletAddress: string): 
   }
 
   const mint = new PublicKey(normalizedAddress);
-  const programIds = [SOLANA_TOKEN_PROGRAM_ID, SOLANA_TOKEN_2022_PROGRAM_ID];
-  const settled = await Promise.allSettled(
-    programIds.map((programId) => connection.getParsedTokenAccountsByOwner(owner, { programId }))
-  );
+  const accounts = await connection.getParsedTokenAccountsByOwner(owner, { mint }, 'confirmed');
 
   let raw = 0n;
-  for (const result of settled) {
-    if (result.status !== 'fulfilled') continue;
-    for (const account of result.value.value) {
-      const parsedInfo = account.account.data.parsed?.info as {
-        mint?: string;
-        tokenAmount?: { amount?: string };
-      } | undefined;
-      if (parsedInfo?.mint !== mint.toString()) continue;
-      raw += BigInt(parsedInfo.tokenAmount?.amount || '0');
-    }
+  for (const account of accounts.value) {
+    const parsedInfo = account.account.data.parsed?.info as {
+      mint?: string;
+      tokenAmount?: { amount?: string };
+    } | undefined;
+    if (parsedInfo?.mint !== mint.toString()) continue;
+    raw += BigInt(parsedInfo.tokenAmount?.amount || '0');
   }
 
   return {

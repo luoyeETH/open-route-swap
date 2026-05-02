@@ -89,6 +89,7 @@ export type OkxSolanaSwapInstructions = {
 
 export type OkxTokenBalance = TokenInfo & {
   balance: string;
+  rawBalance: string | null;
   valueUsd: number | null;
   tokenPrice: number | null;
   isRiskToken: boolean;
@@ -315,6 +316,47 @@ function parseToken(record: Record<string, unknown>, chainKey: ChainKey): TokenI
   };
 }
 
+function parseBalanceToken(record: Record<string, unknown>, chainKey: ChainKey): TokenInfo {
+  const tokenAddress = 'tokenContractAddress' in record
+    ? String(record.tokenContractAddress ?? '').trim()
+    : 'tokenAddress' in record
+      ? String(record.tokenAddress ?? '').trim()
+      : readString(record, ['contractAddress', 'address']);
+  const address = normalizeTokenAddress(tokenAddress, chainKey);
+  const fallbackSymbol = isNativeToken(address, chainKey) ? getChainNativeSymbol(chainKey) || 'NATIVE' : 'TOKEN';
+  const symbol = readString(record, ['tokenSymbol', 'symbol', 'ticker'], fallbackSymbol).toUpperCase();
+  const name = readString(record, ['tokenName', 'name'], symbol);
+  const decimals = readNumber(
+    record,
+    ['decimals', 'decimal', 'tokenDecimal'],
+    isNativeToken(address, chainKey) ? CHAIN_CONFIGS[chainKey].nativeCurrency?.decimals ?? 18 : 18
+  );
+  return {
+    chainKey,
+    address,
+    symbol,
+    name,
+    decimals,
+    logoUrl: readString(record, ['tokenLogoUrl', 'logoUrl', 'logo'], '') || null,
+    source: 'okx',
+  };
+}
+
+function parseTokenBalance(record: Record<string, unknown>, chainKey: ChainKey): OkxTokenBalance | null {
+  const token = parseBalanceToken(record, chainKey);
+  const balance = readString(record, ['balance', 'tokenBalance'], '0');
+  const balanceNumber = Number(balance);
+  const tokenPrice = Number(readString(record, ['tokenPrice', 'price'], ''));
+  return {
+    ...token,
+    balance,
+    rawBalance: readString(record, ['rawBalance', 'rawTokenBalance'], '') || null,
+    valueUsd: Number.isFinite(balanceNumber) && Number.isFinite(tokenPrice) ? balanceNumber * tokenPrice : null,
+    tokenPrice: Number.isFinite(tokenPrice) ? tokenPrice : null,
+    isRiskToken: parseBoolean(record.isRiskToken) === true,
+  };
+}
+
 function assertOkxSuccess(result: OkxEnvelope): void {
   if (result.code !== '0') {
     throw new Error(result.msg || result.message || `OKX 请求失败：${result.code || 'unknown'}`);
@@ -442,20 +484,33 @@ export class OkxClient {
     });
     const result = await this.request('GET', '/api/v6/dex/balance/all-token-balances-by-address', params);
     assertOkxSuccess(result);
-    return flattenTokenRecords(result.data).flatMap((record) => {
-      const token = parseToken(record, chainKey);
-      if (!token) return [];
-      const balance = readString(record, ['balance', 'tokenBalance'], '0');
-      const balanceNumber = Number(balance);
-      const tokenPrice = Number(readString(record, ['tokenPrice', 'price'], ''));
-      return [{
-        ...token,
-        balance,
-        valueUsd: Number.isFinite(balanceNumber) && Number.isFinite(tokenPrice) ? balanceNumber * tokenPrice : null,
-        tokenPrice: Number.isFinite(tokenPrice) ? tokenPrice : null,
-        isRiskToken: parseBoolean(record.isRiskToken) === true,
-      }];
+    return flattenTokenRecords(result.data)
+      .map((record) => parseTokenBalance(record, chainKey))
+      .filter((balance): balance is OkxTokenBalance => Boolean(balance));
+  }
+
+  async getSpecificTokenBalances(chainKey: ChainKey, address: string, tokens: TokenInfo[]): Promise<OkxTokenBalance[]> {
+    const chain = CHAIN_CONFIGS[chainKey];
+    const normalizedAddresses = Array.from(new Set(
+      tokens
+        .filter((token) => token.chainKey === chainKey)
+        .map((token) => normalizeTokenAddress(token.address, chainKey))
+    )).slice(0, 20);
+    if (!normalizedAddresses.length) return [];
+
+    const body = JSON.stringify({
+      address,
+      tokenContractAddresses: normalizedAddresses.map((tokenAddress) => ({
+        chainIndex: chain.chainIndex,
+        tokenContractAddress: isNativeToken(tokenAddress, chainKey) ? '' : tokenAddress,
+      })),
+      excludeRiskToken: '0',
     });
+    const result = await this.request('POST', '/api/v6/dex/balance/token-balances-by-address', undefined, body);
+    assertOkxSuccess(result);
+    return flattenTokenRecords(result.data)
+      .map((record) => parseTokenBalance(record, chainKey))
+      .filter((balance): balance is OkxTokenBalance => Boolean(balance));
   }
 
   async getCandles(params: {

@@ -53,6 +53,7 @@ import {
   OkxCandle,
   OkxQuote,
   getEnvDemoCredentials,
+  type OkxTokenBalance,
 } from '@/lib/okx-client';
 import {
   WalletState,
@@ -134,6 +135,54 @@ function isSameToken(left: string, right: string, chainKey: ChainKey): boolean {
 
 function tokenStorageKey(token: TokenInfo): string {
   return `${token.chainKey}:${normalizeTokenAddress(token.address, token.chainKey)}`;
+}
+
+function isRawBalance(value: string | null | undefined): value is string {
+  return /^\d+$/.test(String(value || '').trim());
+}
+
+function parseOkxRawBalance(balance: OkxTokenBalance, decimals: number): string {
+  if (isRawBalance(balance.rawBalance)) return balance.rawBalance;
+  try {
+    return parseTokenAmount(balance.balance || '0', decimals).toString();
+  } catch {
+    return '0';
+  }
+}
+
+function okxBalanceToTokenBalance(
+  balance: OkxTokenBalance,
+  requestedTokens: TokenInfo[],
+  chainKey: ChainKey
+): TokenBalance {
+  const requestedToken = findTokenByAddress(requestedTokens, chainKey, balance.address) || {
+    ...balance,
+    chainKey,
+  };
+  const raw = parseOkxRawBalance(balance, requestedToken.decimals);
+  return {
+    token: requestedToken,
+    raw,
+    formatted: balance.balance || formatUnits(raw, requestedToken.decimals),
+    valueUsd: balance.valueUsd,
+  };
+}
+
+async function readRpcBalances(
+  tokenList: TokenInfo[],
+  walletAddress: string,
+  chainKey: ChainKey
+): Promise<Record<string, TokenBalance>> {
+  const settled = await Promise.allSettled(
+    tokenList.map((token) => readTokenBalance(token, walletAddress, chainKey))
+  );
+  const balances: Record<string, TokenBalance> = {};
+  for (const item of settled) {
+    if (item.status === 'fulfilled') {
+      balances[tokenStorageKey(item.value.token)] = item.value;
+    }
+  }
+  return balances;
 }
 
 function findTokenByAddress(tokens: TokenInfo[], chainKey: ChainKey, address: string): TokenInfo | null {
@@ -1325,21 +1374,33 @@ export function SwapConsole() {
     const requestId = ++balanceRequestIdRef.current;
     const tokenList = mergeTokenLists([...commonTokens, fromToken, toToken]);
     try {
-      const settled = await Promise.allSettled(
-        tokenList.map((token) => readTokenBalance(token, wallet.address as string, chainKey))
-      );
-      if (requestId !== balanceRequestIdRef.current) return;
-      const next: Record<string, TokenBalance> = {};
-      for (const item of settled) {
-        if (item.status === 'fulfilled') {
-          next[tokenStorageKey(item.value.token)] = item.value;
+      let next: Record<string, TokenBalance> = {};
+      if (okxClient.isReady) {
+        try {
+          const okxBalances = await okxClient.getSpecificTokenBalances(chainKey, wallet.address, tokenList);
+          for (const okxBalance of okxBalances) {
+            const balance = okxBalanceToTokenBalance(okxBalance, tokenList, chainKey);
+            next[tokenStorageKey(balance.token)] = balance;
+          }
+        } catch {
+          next = {};
         }
       }
+
+      const rpcFallbackTokens = commonTokens.filter((token) => !next[tokenStorageKey(token)]);
+      if (rpcFallbackTokens.length) {
+        next = {
+          ...next,
+          ...await readRpcBalances(rpcFallbackTokens, wallet.address, chainKey),
+        };
+      }
+
+      if (requestId !== balanceRequestIdRef.current) return;
       setBalances(next);
     } catch {
       if (requestId === balanceRequestIdRef.current) setBalances({});
     }
-  }, [chainKey, commonTokens, fromToken, isSolanaSelected, toToken, wallet.address, wallet.kind]);
+  }, [chainKey, commonTokens, fromToken, isSolanaSelected, okxClient, toToken, wallet.address, wallet.kind]);
 
   useEffect(() => {
     refreshBalances();
