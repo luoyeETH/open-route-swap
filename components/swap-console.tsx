@@ -138,7 +138,7 @@ function tokenStorageKey(token: TokenInfo): string {
 
 function findTokenByAddress(tokens: TokenInfo[], chainKey: ChainKey, address: string): TokenInfo | null {
   const normalized = normalizeTokenAddress(address, chainKey);
-  return tokens.find((token) => normalizeTokenAddress(token.address, chainKey) === normalized) || null;
+  return tokens.find((token) => token.chainKey === chainKey && normalizeTokenAddress(token.address, chainKey) === normalized) || null;
 }
 
 function extractPastedAddress(text: string): AddressCandidate | null {
@@ -1342,8 +1342,8 @@ export function SwapConsole() {
       throw new Error('本地未找到该代币，请先设置 OKX');
     }
 
+    const remoteTokens = await okxClient.searchTokensAcrossChains(candidateChains, candidate.address);
     for (const candidateChainKey of candidateChains) {
-      const remoteTokens = await okxClient.getAllTokens(candidateChainKey);
       const remoteMatch = findTokenByAddress(remoteTokens, candidateChainKey, candidate.address);
       if (remoteMatch) return { chainKey: candidateChainKey, token: remoteMatch };
     }

@@ -6,6 +6,7 @@ import {
   getChainNativeSymbol,
   getOkxBaseUrl,
   isNativeToken,
+  mergeTokenLists,
   normalizeTokenAddress,
 } from '@/lib/chains';
 
@@ -113,6 +114,9 @@ type OkxEnvelope = {
 };
 
 const EMPTY_BODY = '';
+const CHAIN_KEY_BY_CHAIN_INDEX = new Map<string, ChainKey>(
+  Object.values(CHAIN_CONFIGS).map((chain) => [chain.chainIndex, chain.key])
+);
 
 function ensureConfiguredCredentials(config: OkxClientConfig): OkxCredentials {
   const credentials = config.credentials;
@@ -403,18 +407,28 @@ export class OkxClient {
   }
 
   async searchTokens(chainKey: ChainKey, query: string): Promise<TokenInfo[]> {
-    const needle = query.trim().toLowerCase();
-    if (!needle) return [];
-    const tokens = await this.getAllTokens(chainKey);
-    return tokens
-      .filter((token) => {
-        const address = token.address.toLowerCase();
-        return token.symbol.toLowerCase().includes(needle)
-          || token.name.toLowerCase().includes(needle)
-          || address === needle
-          || address.includes(needle);
-      })
-      .slice(0, 40);
+    return this.searchTokensAcrossChains([chainKey], query, 40);
+  }
+
+  async searchTokensAcrossChains(chainKeys: ChainKey[], query: string, limit = 100): Promise<TokenInfo[]> {
+    const chains = Array.from(new Set(chainKeys));
+    const search = query.trim();
+    if (!chains.length || !search) return [];
+
+    const params = new URLSearchParams({
+      chains: chains.map((chainKey) => CHAIN_CONFIGS[chainKey].chainIndex).join(','),
+      search,
+      limit: String(limit),
+    });
+    const result = await this.request('GET', '/api/v6/dex/market/token/search', params);
+    assertOkxSuccess(result);
+
+    return mergeTokenLists(flattenTokenRecords(result.data).flatMap((record) => {
+      const chainKey = CHAIN_KEY_BY_CHAIN_INDEX.get(readString(record, ['chainIndex']));
+      if (!chainKey) return [];
+      const token = parseToken(record, chainKey);
+      return token ? [token] : [];
+    }));
   }
 
   async getTokenBalances(chainKey: ChainKey, address: string): Promise<OkxTokenBalance[]> {
