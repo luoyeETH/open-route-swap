@@ -315,6 +315,21 @@ function assertOkxSuccess(result: OkxEnvelope): void {
   }
 }
 
+function normalizeSignerProxyUrl(value: string): string {
+  const trimmed = value.trim();
+  if (!trimmed) return trimmed;
+
+  try {
+    const url = new URL(trimmed);
+    if (url.pathname === '' || url.pathname === '/') {
+      url.pathname = '/okx';
+    }
+    return url.toString();
+  } catch {
+    return trimmed;
+  }
+}
+
 export class OkxClient {
   private readonly config: OkxClientConfig;
 
@@ -341,7 +356,7 @@ export class OkxClient {
     const requestPath = `${path}${query ? `?${query}` : ''}`;
 
     if (this.config.mode === 'signer-proxy') {
-      const proxyUrl = this.config.signerProxyUrl?.trim();
+      const proxyUrl = normalizeSignerProxyUrl(this.config.signerProxyUrl || '');
       if (!proxyUrl) throw new Error('Signer Proxy URL 未配置');
       const response = await fetch(proxyUrl, {
         method: 'POST',
