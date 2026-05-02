@@ -284,7 +284,7 @@ function ChainDropdown({
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className="flex h-9 max-w-[170px] items-center gap-1.5 rounded-lg border border-white/[0.12] bg-[#151c23] px-2.5 text-sm font-medium text-white outline-none transition hover:bg-[#1a222b]"
+        className="flex h-9 max-w-[130px] items-center gap-1.5 rounded-lg border border-white/[0.12] bg-[#151c23] px-2.5 text-sm font-medium text-white outline-none transition hover:bg-[#1a222b] sm:max-w-[170px]"
         title="选择链"
       >
         <span className="truncate">{CHAIN_CONFIGS[value].label}</span>
@@ -922,10 +922,10 @@ function KlineModal({
     <div className="fixed inset-0 z-40 flex items-end justify-center sm:items-center" onClick={onClose}>
       <div className="absolute inset-0 bg-black/62 backdrop-blur-sm" />
       <div
-        className="sheet-enter relative max-h-[88dvh] w-full max-w-[900px] overflow-hidden rounded-t-2xl border border-white/[0.08] bg-[#11171d] shadow-soft sm:rounded-2xl"
+        className="sheet-enter relative flex max-h-[88dvh] w-full max-w-[900px] flex-col overflow-hidden rounded-t-2xl border border-white/[0.08] bg-[#11171d] shadow-soft sm:rounded-2xl"
         onClick={(event) => event.stopPropagation()}
       >
-        <div className="flex items-center justify-between gap-3 border-b border-white/[0.07] px-4 py-3">
+        <div className="flex shrink-0 items-center justify-between gap-3 border-b border-white/[0.07] px-4 py-3">
           <div className="flex min-w-0 items-center gap-3">
             <TokenAvatar token={token} size={28} />
             <div className="min-w-0">
@@ -938,7 +938,7 @@ function KlineModal({
           </IconButton>
         </div>
 
-        <div className="space-y-3 p-3 sm:p-4">
+        <div className="min-h-0 space-y-3 overflow-y-auto p-3 sm:p-4">
           <div className="grid grid-cols-1 gap-2 min-[360px]:grid-cols-2 sm:grid-cols-[1fr_1fr_auto]">
             <div className="soft-inset rounded-xl p-3">
               <div className="text-[11px] text-white/40">最新价</div>
@@ -970,7 +970,7 @@ function KlineModal({
             </div>
           </div>
 
-          <div className="h-[320px] rounded-2xl border border-white/[0.08] bg-white/[0.025] p-2">
+          <div className="h-[260px] rounded-2xl border border-white/[0.08] bg-white/[0.025] p-2 sm:h-[320px]">
             {loading ? (
               <div className="h-full space-y-3 p-3">
                 <div className="skeleton h-7 w-40 rounded-lg" />
@@ -1675,8 +1675,8 @@ export function SwapConsole() {
   ]);
 
   return (
-    <main className="min-h-[100dvh] px-3 py-4 sm:px-5 sm:py-6">
-      <div className="mx-auto grid w-full max-w-[1080px] gap-4 lg:grid-cols-[520px_1fr]">
+    <main className="min-h-[100dvh] overflow-x-hidden px-3 py-4 sm:px-5 sm:py-6">
+      <div className="mx-auto grid w-full max-w-full gap-4 lg:max-w-[1080px] lg:grid-cols-[520px_1fr]">
         <section className="space-y-3">
           <header className="flex flex-wrap items-center justify-between gap-2 sm:gap-3">
             <div className="flex min-w-0 items-center gap-3">
@@ -1686,7 +1686,7 @@ export function SwapConsole() {
                 <div className="mono-num mt-0.5 text-xs text-white/40">fee {REQUIRED_OKX_FEE_PERCENT}%</div>
               </div>
             </div>
-            <div className="flex min-w-0 flex-1 flex-wrap items-center justify-end gap-2">
+            <div className="flex min-w-0 flex-1 flex-wrap items-center justify-end gap-1.5 sm:gap-2">
               <ChainDropdown value={chainKey} onChange={(key) => setChainKey(key)} />
               <IconButton title="OKX 设置" onClick={() => setSettingsOpen(true)}>
                 <Settings className="h-4 w-4" />
@@ -1695,10 +1695,11 @@ export function SwapConsole() {
                 type="button"
                 onClick={wallet.connected ? undefined : handleConnect}
                 disabled={wallet.connected}
-                className="flex h-9 max-w-[190px] min-w-0 items-center gap-2 rounded-lg border border-white/[0.08] bg-white/[0.045] px-3 text-sm text-white/72 transition hover:bg-white/[0.08] active:translate-y-px disabled:cursor-default disabled:hover:bg-white/[0.045] disabled:active:translate-y-0 sm:max-w-[220px]"
+                className="flex h-9 min-w-0 items-center gap-2 rounded-lg border border-white/[0.08] bg-white/[0.045] px-2.5 text-sm text-white/72 transition hover:bg-white/[0.08] active:translate-y-px disabled:cursor-default disabled:hover:bg-white/[0.045] disabled:active:translate-y-0 sm:max-w-[220px] sm:px-3"
+                title={wallet.address ? shortAddress(wallet.address) : (isSolanaSelected ? '连接 Solana' : '连接钱包')}
               >
                 <Wallet className="h-4 w-4 shrink-0" />
-                <span className="truncate">{wallet.address ? shortAddress(wallet.address) : (isSolanaSelected ? '连接 Solana' : '连接钱包')}</span>
+                <span className="hidden truncate sm:inline">{wallet.address ? shortAddress(wallet.address) : (isSolanaSelected ? '连接 Solana' : '连接钱包')}</span>
               </button>
               {wallet.connected ? (
                 <IconButton title="断开钱包" onClick={handleDisconnect}>
