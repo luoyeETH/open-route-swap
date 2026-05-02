@@ -1,0 +1,460 @@
+import {
+  CHAIN_CONFIGS,
+  OKX_NATIVE_TOKEN_ADDRESS,
+  REQUIRED_OKX_FEE_PERCENT,
+  type ChainKey,
+  type TokenInfo,
+  getOkxBaseUrl,
+  normalizeTokenAddress,
+} from '@/lib/chains';
+
+export type CredentialProvider = 'none' | 'user-input' | 'env-demo' | 'signer-proxy';
+
+export type OkxCredentials = {
+  apiKey: string;
+  secretKey: string;
+  passphrase: string;
+};
+
+export type OkxClientConfig = {
+  mode: CredentialProvider;
+  credentials?: OkxCredentials | null;
+  signerProxyUrl?: string | null;
+  baseUrl?: string;
+};
+
+export type OkxRoute = {
+  dex: string;
+  percent: string;
+};
+
+export type OkxQuote = {
+  fromTokenAmount: string;
+  toTokenAmount: string;
+  priceImpactPercent: string | null;
+  estimateGasFee: string | null;
+  tradeFee: string | null;
+  isHoneyPot: boolean | null;
+  routes: OkxRoute[];
+  raw: unknown;
+};
+
+export type OkxApproveTransaction = {
+  data: string | null;
+  dexContractAddress: string | null;
+  raw: unknown;
+};
+
+export type OkxSwapTransaction = {
+  tx: {
+    to: string;
+    data: string;
+    value: string;
+    gas: string | null;
+  };
+  routerResult: {
+    fromTokenAmount: string;
+    toTokenAmount: string;
+    routes: OkxRoute[];
+  };
+  priceImpactPercent: string | null;
+  raw: unknown;
+};
+
+export type OkxTokenBalance = TokenInfo & {
+  balance: string;
+  valueUsd: number | null;
+  tokenPrice: number | null;
+  isRiskToken: boolean;
+};
+
+type OkxEnvelope = {
+  code?: string;
+  msg?: string;
+  message?: string;
+  data?: unknown;
+};
+
+const EMPTY_BODY = '';
+
+function ensureConfiguredCredentials(config: OkxClientConfig): OkxCredentials {
+  const credentials = config.credentials;
+  const apiKey = credentials?.apiKey?.trim() || '';
+  const secretKey = credentials?.secretKey?.trim() || '';
+  const passphrase = credentials?.passphrase?.trim() || '';
+  if (!apiKey || !secretKey || !passphrase) {
+    throw new Error('OKX API Key / Secret / Passphrase 需要完整填写');
+  }
+  return { apiKey, secretKey, passphrase };
+}
+
+function textToBase64(bytes: ArrayBuffer): string {
+  const values = new Uint8Array(bytes);
+  let binary = '';
+  for (const value of values) {
+    binary += String.fromCharCode(value);
+  }
+  return btoa(binary);
+}
+
+async function hmacSha256Base64(message: string, secretKey: string): Promise<string> {
+  if (!globalThis.crypto?.subtle) {
+    throw new Error('当前浏览器不支持 Web Crypto，无法在前端生成 OKX 签名');
+  }
+
+  const encoder = new TextEncoder();
+  const key = await globalThis.crypto.subtle.importKey(
+    'raw',
+    encoder.encode(secretKey),
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign']
+  );
+  const signature = await globalThis.crypto.subtle.sign('HMAC', key, encoder.encode(message));
+  return textToBase64(signature);
+}
+
+function asOkxEnvelope(value: unknown): OkxEnvelope {
+  if (!value || typeof value !== 'object') return {};
+  return value as OkxEnvelope;
+}
+
+function dataArray(result: OkxEnvelope): unknown[] {
+  return Array.isArray(result.data) ? result.data : [];
+}
+
+function firstDataObject(result: OkxEnvelope): Record<string, unknown> | null {
+  const first = dataArray(result)[0];
+  return first && typeof first === 'object' ? (first as Record<string, unknown>) : null;
+}
+
+function readString(record: Record<string, unknown>, keys: string[], fallback = ''): string {
+  for (const key of keys) {
+    const value = record[key];
+    if (value == null) continue;
+    const text = String(value).trim();
+    if (text) return text;
+  }
+  return fallback;
+}
+
+function readNumber(record: Record<string, unknown>, keys: string[], fallback: number): number {
+  for (const key of keys) {
+    const parsed = Number(record[key]);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return fallback;
+}
+
+function parseRoutes(value: unknown): OkxRoute[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((entry) => {
+    if (!entry || typeof entry !== 'object') return [];
+    const route = entry as Record<string, unknown>;
+    const protocol = route.dexProtocol && typeof route.dexProtocol === 'object'
+      ? (route.dexProtocol as Record<string, unknown>)
+      : route;
+    return [{
+      dex: readString(protocol, ['dexName', 'name'], 'Unknown'),
+      percent: readString(protocol, ['percent'], '100'),
+    }];
+  });
+}
+
+function parseBoolean(value: unknown): boolean | null {
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'number') return value === 1;
+  const text = String(value ?? '').trim().toLowerCase();
+  if (!text) return null;
+  if (['true', '1', 'yes'].includes(text)) return true;
+  if (['false', '0', 'no'].includes(text)) return false;
+  return null;
+}
+
+function flattenTokenRecords(data: unknown): Record<string, unknown>[] {
+  if (!Array.isArray(data)) return [];
+  const records: Record<string, unknown>[] = [];
+  for (const entry of data) {
+    if (Array.isArray(entry)) {
+      records.push(...flattenTokenRecords(entry));
+      continue;
+    }
+    if (!entry || typeof entry !== 'object') continue;
+    const record = entry as Record<string, unknown>;
+    const tokenList = record.tokenList ?? record.tokens ?? record.tokenAssets;
+    if (Array.isArray(tokenList)) {
+      records.push(...flattenTokenRecords(tokenList));
+      continue;
+    }
+    records.push(record);
+  }
+  return records;
+}
+
+function parseToken(record: Record<string, unknown>, chainKey: ChainKey): TokenInfo | null {
+  const address = normalizeTokenAddress(readString(record, [
+    'tokenContractAddress',
+    'address',
+    'contractAddress',
+    'tokenAddress',
+  ]));
+  const symbol = readString(record, ['tokenSymbol', 'symbol', 'ticker'], 'TOKEN').toUpperCase();
+  const name = readString(record, ['tokenName', 'name'], symbol);
+  const decimals = readNumber(record, ['decimals', 'decimal', 'tokenDecimal'], 18);
+  if (!address || address === OKX_NATIVE_TOKEN_ADDRESS && symbol !== 'BNB') {
+    return {
+      chainKey,
+      address,
+      symbol: symbol || 'BNB',
+      name: name || symbol || 'BNB',
+      decimals,
+      logoUrl: readString(record, ['tokenLogoUrl', 'logoUrl', 'logo'], '') || null,
+      source: 'okx',
+    };
+  }
+  return {
+    chainKey,
+    address,
+    symbol,
+    name,
+    decimals,
+    logoUrl: readString(record, ['tokenLogoUrl', 'logoUrl', 'logo'], '') || null,
+    source: 'okx',
+  };
+}
+
+function assertOkxSuccess(result: OkxEnvelope): void {
+  if (result.code !== '0') {
+    throw new Error(result.msg || result.message || `OKX 请求失败：${result.code || 'unknown'}`);
+  }
+}
+
+export class OkxClient {
+  private readonly config: OkxClientConfig;
+
+  constructor(config: OkxClientConfig) {
+    this.config = {
+      ...config,
+      baseUrl: config.baseUrl || getOkxBaseUrl(),
+    };
+  }
+
+  get isReady(): boolean {
+    if (this.config.mode === 'signer-proxy') {
+      return Boolean(this.config.signerProxyUrl?.trim());
+    }
+    if (this.config.mode === 'user-input' || this.config.mode === 'env-demo') {
+      const credentials = this.config.credentials;
+      return Boolean(credentials?.apiKey?.trim() && credentials?.secretKey?.trim() && credentials?.passphrase?.trim());
+    }
+    return false;
+  }
+
+  private async request(method: 'GET' | 'POST', path: string, params?: URLSearchParams, body = EMPTY_BODY): Promise<OkxEnvelope> {
+    const query = params?.toString();
+    const requestPath = `${path}${query ? `?${query}` : ''}`;
+
+    if (this.config.mode === 'signer-proxy') {
+      const proxyUrl = this.config.signerProxyUrl?.trim();
+      if (!proxyUrl) throw new Error('Signer Proxy URL 未配置');
+      const response = await fetch(proxyUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ method, requestPath, body: body || null }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(payload?.error || payload?.msg || `Signer Proxy 请求失败：HTTP ${response.status}`);
+      }
+      return asOkxEnvelope(payload?.okx || payload?.data?.okx || payload);
+    }
+
+    const credentials = ensureConfiguredCredentials(this.config);
+    const timestamp = new Date().toISOString();
+    const preHash = `${timestamp}${method}${requestPath}${method === 'POST' ? body : ''}`;
+    const signature = await hmacSha256Base64(preHash, credentials.secretKey);
+    const response = await fetch(`${this.config.baseUrl}${requestPath}`, {
+      method,
+      headers: {
+        'Content-Type': 'application/json',
+        'OK-ACCESS-KEY': credentials.apiKey,
+        'OK-ACCESS-SIGN': signature,
+        'OK-ACCESS-TIMESTAMP': timestamp,
+        'OK-ACCESS-PASSPHRASE': credentials.passphrase,
+      },
+      body: method === 'POST' && body ? body : undefined,
+    });
+    const payload = asOkxEnvelope(await response.json().catch(() => ({})));
+    if (!response.ok && !payload.code) {
+      throw new Error(payload.msg || payload.message || `OKX HTTP ${response.status}`);
+    }
+    return payload;
+  }
+
+  async getAllTokens(chainKey: ChainKey): Promise<TokenInfo[]> {
+    const chain = CHAIN_CONFIGS[chainKey];
+    const params = new URLSearchParams({ chainIndex: chain.chainIndex });
+    const result = await this.request('GET', '/api/v6/dex/aggregator/all-tokens', params);
+    assertOkxSuccess(result);
+    return flattenTokenRecords(result.data)
+      .map((record) => parseToken(record, chainKey))
+      .filter((token): token is TokenInfo => Boolean(token));
+  }
+
+  async searchTokens(chainKey: ChainKey, query: string): Promise<TokenInfo[]> {
+    const needle = query.trim().toLowerCase();
+    if (!needle) return [];
+    const tokens = await this.getAllTokens(chainKey);
+    return tokens
+      .filter((token) => {
+        const address = token.address.toLowerCase();
+        return token.symbol.toLowerCase().includes(needle)
+          || token.name.toLowerCase().includes(needle)
+          || address === needle
+          || address.includes(needle);
+      })
+      .slice(0, 40);
+  }
+
+  async getTokenBalances(chainKey: ChainKey, address: string): Promise<OkxTokenBalance[]> {
+    const chain = CHAIN_CONFIGS[chainKey];
+    const params = new URLSearchParams({
+      chains: chain.chainIndex,
+      address,
+      excludeRiskToken: '0',
+    });
+    const result = await this.request('GET', '/api/v6/dex/balance/all-token-balances-by-address', params);
+    assertOkxSuccess(result);
+    return flattenTokenRecords(result.data).flatMap((record) => {
+      const token = parseToken(record, chainKey);
+      if (!token) return [];
+      const balance = readString(record, ['balance', 'tokenBalance'], '0');
+      const balanceNumber = Number(balance);
+      const tokenPrice = Number(readString(record, ['tokenPrice', 'price'], ''));
+      return [{
+        ...token,
+        balance,
+        valueUsd: Number.isFinite(balanceNumber) && Number.isFinite(tokenPrice) ? balanceNumber * tokenPrice : null,
+        tokenPrice: Number.isFinite(tokenPrice) ? tokenPrice : null,
+        isRiskToken: parseBoolean(record.isRiskToken) === true,
+      }];
+    });
+  }
+
+  async getQuote(params: {
+    chainKey: ChainKey;
+    fromTokenAddress: string;
+    toTokenAddress: string;
+    amount: string;
+    slippagePercent: string;
+  }): Promise<OkxQuote> {
+    const chain = CHAIN_CONFIGS[params.chainKey];
+    const query = new URLSearchParams({
+      chainIndex: chain.chainIndex,
+      fromTokenAddress: normalizeTokenAddress(params.fromTokenAddress),
+      toTokenAddress: normalizeTokenAddress(params.toTokenAddress),
+      amount: params.amount,
+      slippagePercent: params.slippagePercent,
+      swapMode: 'exactIn',
+    });
+    const result = await this.request('GET', '/api/v6/dex/aggregator/quote', query);
+    assertOkxSuccess(result);
+    const quote = firstDataObject(result);
+    if (!quote) throw new Error('OKX 未返回报价数据');
+    return {
+      fromTokenAmount: readString(quote, ['fromTokenAmount'], params.amount),
+      toTokenAmount: readString(quote, ['toTokenAmount'], '0'),
+      priceImpactPercent: readString(quote, ['priceImpactPercent'], '') || null,
+      estimateGasFee: readString(quote, ['estimateGasFee'], '') || null,
+      tradeFee: readString(quote, ['tradeFee'], '') || null,
+      isHoneyPot: parseBoolean(quote.isHoneyPot),
+      routes: parseRoutes(quote.dexRouterList),
+      raw: quote,
+    };
+  }
+
+  async getApproveTransaction(params: {
+    chainKey: ChainKey;
+    tokenContractAddress: string;
+    approveAmount: string;
+  }): Promise<OkxApproveTransaction> {
+    const chain = CHAIN_CONFIGS[params.chainKey];
+    const query = new URLSearchParams({
+      chainIndex: chain.chainIndex,
+      tokenContractAddress: normalizeTokenAddress(params.tokenContractAddress),
+      approveAmount: params.approveAmount,
+    });
+    const result = await this.request('GET', '/api/v6/dex/aggregator/approve-transaction', query);
+    assertOkxSuccess(result);
+    const approval = firstDataObject(result);
+    if (!approval) throw new Error('OKX 未返回授权数据');
+    return {
+      data: readString(approval, ['data'], '') || null,
+      dexContractAddress: readString(approval, ['dexContractAddress', 'spender'], '') || null,
+      raw: approval,
+    };
+  }
+
+  async getSwapTransaction(params: {
+    chainKey: ChainKey;
+    fromTokenAddress: string;
+    toTokenAddress: string;
+    amount: string;
+    slippagePercent: string;
+    userWalletAddress: string;
+    fromTokenReferrerWalletAddress: string;
+    feePercent?: string;
+  }): Promise<OkxSwapTransaction> {
+    const chain = CHAIN_CONFIGS[params.chainKey];
+    const query = new URLSearchParams({
+      chainIndex: chain.chainIndex,
+      fromTokenAddress: normalizeTokenAddress(params.fromTokenAddress),
+      toTokenAddress: normalizeTokenAddress(params.toTokenAddress),
+      amount: params.amount,
+      slippagePercent: params.slippagePercent,
+      userWalletAddress: params.userWalletAddress,
+      swapMode: 'exactIn',
+      feePercent: params.feePercent || REQUIRED_OKX_FEE_PERCENT,
+      fromTokenReferrerWalletAddress: params.fromTokenReferrerWalletAddress,
+      priceImpactProtectionPercent: '10',
+    });
+    const result = await this.request('GET', '/api/v6/dex/aggregator/swap', query);
+    assertOkxSuccess(result);
+    const swap = firstDataObject(result);
+    if (!swap) throw new Error('OKX 未返回交易数据');
+
+    const tx = swap.tx && typeof swap.tx === 'object'
+      ? (swap.tx as Record<string, unknown>)
+      : {};
+    const routerResult = swap.routerResult && typeof swap.routerResult === 'object'
+      ? (swap.routerResult as Record<string, unknown>)
+      : {};
+    const to = readString(tx, ['to']);
+    const data = readString(tx, ['data']);
+    if (!to || !data) throw new Error('OKX 交易数据缺少 tx.to 或 tx.data');
+
+    return {
+      tx: {
+        to,
+        data,
+        value: readString(tx, ['value'], '0'),
+        gas: readString(tx, ['gas', 'gasLimit'], '') || null,
+      },
+      routerResult: {
+        fromTokenAmount: readString(routerResult, ['fromTokenAmount'], params.amount),
+        toTokenAmount: readString(routerResult, ['toTokenAmount'], '0'),
+        routes: parseRoutes(routerResult.dexRouterList),
+      },
+      priceImpactPercent: readString(routerResult, ['priceImpactPercent'], '') || readString(swap, ['priceImpactPercent'], '') || null,
+      raw: swap,
+    };
+  }
+}
+
+export function getEnvDemoCredentials(): OkxCredentials | null {
+  const apiKey = process.env.NEXT_PUBLIC_DEMO_OKX_API_KEY?.trim() || '';
+  const secretKey = process.env.NEXT_PUBLIC_DEMO_OKX_SECRET?.trim() || '';
+  const passphrase = process.env.NEXT_PUBLIC_DEMO_OKX_PASSPHRASE?.trim() || '';
+  if (!apiKey && !secretKey && !passphrase) return null;
+  return { apiKey, secretKey, passphrase };
+}
