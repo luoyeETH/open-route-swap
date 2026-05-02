@@ -1,9 +1,11 @@
 import { isAddress } from 'ethers';
 
 export const OKX_NATIVE_TOKEN_ADDRESS = '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee';
+export const SOLANA_NATIVE_TOKEN_ADDRESS = '11111111111111111111111111111111';
 export const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000';
 export const REQUIRED_OKX_FEE_PERCENT = '0.01';
 export const DEFAULT_OKX_REFERRER_WALLET_ADDRESS = '0xddddd4a482561b90908329c145365c2bbe6adddd';
+export const DEFAULT_OKX_SOLANA_REFERRER_WALLET_ADDRESS = 'GivfQdgTJySDcavJT99KVwQ5FksfgUuLGBrbknRmqNEK';
 
 export type ChainKey =
   | 'ethereum'
@@ -46,12 +48,13 @@ export type ChainConfig = {
 };
 
 function nativeToken(chainKey: ChainKey, symbol: string, name = symbol): TokenInfo {
+  const chain = CHAIN_CONFIGS[chainKey];
   return {
     chainKey,
     symbol,
     name,
-    address: OKX_NATIVE_TOKEN_ADDRESS,
-    decimals: 18,
+    address: chainKey === 'solana' ? SOLANA_NATIVE_TOKEN_ADDRESS : OKX_NATIVE_TOKEN_ADDRESS,
+    decimals: chainKey === 'solana' ? 9 : chain.nativeCurrency?.decimals ?? 18,
     source: 'preset',
   };
 }
@@ -288,8 +291,13 @@ export const CHAIN_CONFIGS: Record<ChainKey, ChainConfig> = {
     key: 'solana',
     label: 'Solana',
     chainIndex: '501',
-    rpcUrls: [],
-    disabled: true,
+    rpcUrls: [process.env.NEXT_PUBLIC_SOLANA_RPC_URL?.trim() || 'https://api.mainnet-beta.solana.com'],
+    blockExplorerUrl: 'https://solscan.io',
+    nativeCurrency: {
+      name: 'Solana',
+      symbol: 'SOL',
+      decimals: 9,
+    },
   },
 };
 
@@ -308,7 +316,7 @@ export const EVM_CHAIN_KEYS = [
 
 export type EvmChainKey = (typeof EVM_CHAIN_KEYS)[number];
 
-export const SELECTABLE_CHAIN_KEYS = [...EVM_CHAIN_KEYS] as const satisfies readonly ChainKey[];
+export const SELECTABLE_CHAIN_KEYS = [...EVM_CHAIN_KEYS, 'solana'] as const satisfies readonly ChainKey[];
 
 export const COMMON_TOKENS_BY_CHAIN: Record<ChainKey, TokenInfo[]> = {
   ethereum: [
@@ -390,7 +398,11 @@ export const COMMON_TOKENS_BY_CHAIN: Record<ChainKey, TokenInfo[]> = {
     presetToken('zksync', 'USDC', 'USD Coin', '0x1d17cbcf0d3a2f6b4f03c50131591bcff9a65492', 6),
     presetToken('zksync', 'WBTC', 'Wrapped BTC', '0xbbeb516fb02a01611cbbe0453fe3c580d7281011', 8),
   ],
-  solana: [],
+  solana: [
+    nativeToken('solana', 'SOL', 'Solana'),
+    presetToken('solana', 'USDC', 'USD Coin', 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v', 6),
+    presetToken('solana', 'USDT', 'Tether USD', 'Es9vMFrzaCERmJfrF4H2FYD4J96DUPx4dHcpny8wfZfG', 6),
+  ],
 };
 
 export const BSC_COMMON_TOKENS = COMMON_TOKENS_BY_CHAIN.bsc;
@@ -420,16 +432,26 @@ export const TOKEN_COLORS: Record<string, string> = {
   ARB: '#28a0f0',
   OP: '#ff0420',
   CAKE: '#b47a52',
+  SOL: '#14f195',
 };
 
-export function normalizeTokenAddress(address: string | null | undefined): string {
-  const value = String(address || '').trim().toLowerCase();
+export function normalizeTokenAddress(address: string | null | undefined, chainKey?: ChainKey): string {
+  const raw = String(address || '').trim();
+  const evmValue = raw.toLowerCase();
+  if (chainKey === 'solana') {
+    if (!raw || raw === ZERO_ADDRESS || evmValue === OKX_NATIVE_TOKEN_ADDRESS) return SOLANA_NATIVE_TOKEN_ADDRESS;
+    return raw;
+  }
+  const value = evmValue;
   if (!value || value === ZERO_ADDRESS) return OKX_NATIVE_TOKEN_ADDRESS;
   return value;
 }
 
-export function isNativeToken(address: string | null | undefined): boolean {
-  return normalizeTokenAddress(address) === OKX_NATIVE_TOKEN_ADDRESS;
+export function isNativeToken(address: string | null | undefined, chainKey?: ChainKey): boolean {
+  const normalized = normalizeTokenAddress(address, chainKey);
+  return chainKey === 'solana'
+    ? normalized === SOLANA_NATIVE_TOKEN_ADDRESS
+    : normalized === OKX_NATIVE_TOKEN_ADDRESS;
 }
 
 export function isEvmChain(chainKey: ChainKey): chainKey is EvmChainKey {
@@ -438,11 +460,20 @@ export function isEvmChain(chainKey: ChainKey): chainKey is EvmChainKey {
 
 export function isSupportedSwapChain(chainKey: ChainKey): boolean {
   const chain = CHAIN_CONFIGS[chainKey];
+  if (chainKey === 'solana') return !chain.disabled && Boolean(chain.rpcUrls[0]);
   return isEvmChain(chainKey) && !chain.disabled && Boolean(chain.chainId && chain.chainIdHex && chain.rpcUrls[0]);
 }
 
 export function isValidEvmAddress(address: string | null | undefined): boolean {
   return isAddress(String(address || '').trim());
+}
+
+export function isSolanaChain(chainKey: ChainKey): boolean {
+  return chainKey === 'solana';
+}
+
+export function isValidSolanaAddress(address: string | null | undefined): boolean {
+  return /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(String(address || '').trim());
 }
 
 export function getChainNativeSymbol(chainKey: ChainKey): string {
@@ -471,6 +502,11 @@ export function getConfiguredReferrerAddress(): string {
     || DEFAULT_OKX_REFERRER_WALLET_ADDRESS;
 }
 
+export function getConfiguredSolanaReferrerAddress(): string {
+  return process.env.NEXT_PUBLIC_OKX_SOLANA_REFERRER_WALLET_ADDRESS?.trim()
+    || DEFAULT_OKX_SOLANA_REFERRER_WALLET_ADDRESS;
+}
+
 export function getOkxBaseUrl(): string {
   return process.env.NEXT_PUBLIC_OKX_BASE_URL?.trim() || 'https://web3.okx.com';
 }
@@ -484,7 +520,7 @@ export function getDefaultChainKey(): ChainKey {
 export function mergeTokenLists(tokens: TokenInfo[]): TokenInfo[] {
   const byChainAndAddress = new Map<string, TokenInfo>();
   for (const token of tokens) {
-    const address = normalizeTokenAddress(token.address);
+    const address = normalizeTokenAddress(token.address, token.chainKey);
     const key = `${token.chainKey}:${address}`;
     const existing = byChainAndAddress.get(key);
     byChainAndAddress.set(key, {

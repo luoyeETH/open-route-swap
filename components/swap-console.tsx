@@ -25,13 +25,16 @@ import {
   getCommonTokens,
   getConfiguredFeePercent,
   getConfiguredReferrerAddress,
+  getConfiguredSolanaReferrerAddress,
   getDefaultChainKey,
   getDefaultFromToken,
   getDefaultToToken,
   getOkxBaseUrl,
   isNativeToken,
+  isSolanaChain,
   isSupportedSwapChain,
   isValidEvmAddress,
+  isValidSolanaAddress,
   mergeTokenLists,
   normalizeTokenAddress,
 } from '@/lib/chains';
@@ -45,14 +48,18 @@ import {
 import {
   WalletState,
   approveToken,
+  connectSolanaWallet,
   connectWallet,
   getNativeGasSymbol,
   getInjectedProvider,
+  getInjectedSolanaProvider,
+  getSolanaWalletState,
   getWalletState,
   isWalletOnChain,
   parseTokenAmount,
   readAllowance,
   readTokenBalance,
+  sendSolanaSwapInstructions,
   sendSwapTransaction,
   switchToChain,
   type TokenBalance,
@@ -97,17 +104,22 @@ function readErrorMessage(error: unknown, fallback: string): string {
   return fallback;
 }
 
-function isSameToken(left: string, right: string): boolean {
-  return normalizeTokenAddress(left) === normalizeTokenAddress(right);
+function isSameToken(left: string, right: string, chainKey: ChainKey): boolean {
+  return normalizeTokenAddress(left, chainKey) === normalizeTokenAddress(right, chainKey);
 }
 
 function tokenStorageKey(token: TokenInfo): string {
-  return `${token.chainKey}:${normalizeTokenAddress(token.address)}`;
+  return `${token.chainKey}:${normalizeTokenAddress(token.address, token.chainKey)}`;
+}
+
+function emptyWalletState(): WalletState {
+  return { address: null, chainId: null, connected: false, kind: null };
 }
 
 function buildExplorerUrl(chainKey: ChainKey, hash: string): string {
   const explorerUrl = CHAIN_CONFIGS[chainKey].blockExplorerUrl;
-  return explorerUrl ? `${explorerUrl}/tx/${hash}` : '#';
+  if (!explorerUrl) return '#';
+  return chainKey === 'solana' ? `${explorerUrl}/tx/${hash}` : `${explorerUrl}/tx/${hash}`;
 }
 
 function SwapLogo({ size = 36 }: { size?: number }) {
@@ -450,8 +462,8 @@ function TokenSelectorSheet({
             </div>
           ) : visibleTokens.length > 0 ? (
             visibleTokens.map((token) => {
-              const disabled = isSameToken(token.address, disabledAddress);
-              const selected = isSameToken(token.address, selectedAddress);
+              const disabled = isSameToken(token.address, disabledAddress, chainKey);
+              const selected = isSameToken(token.address, selectedAddress, chainKey);
               return (
                 <button
                   type="button"
@@ -693,7 +705,7 @@ function ConfirmSwapModal({
 
 export function SwapConsole() {
   const [chainKey, setChainKey] = useState<ChainKey>(getDefaultChainKey());
-  const [wallet, setWallet] = useState<WalletState>({ address: null, chainId: null, connected: false });
+  const [wallet, setWallet] = useState<WalletState>(emptyWalletState);
   const [tokens, setTokens] = useState<TokenInfo[]>(() => getCommonTokens(getDefaultChainKey()));
   const [fromAddress, setFromAddress] = useState(() => getDefaultFromToken(getDefaultChainKey()).address);
   const [toAddress, setToAddress] = useState(() => getDefaultToToken(getDefaultChainKey()).address);
@@ -717,6 +729,7 @@ export function SwapConsole() {
   const quoteRequestIdRef = useRef(0);
   const balanceRequestIdRef = useRef(0);
   const chain = CHAIN_CONFIGS[chainKey];
+  const isSolanaSelected = isSolanaChain(chainKey);
   const commonTokens = getCommonTokens(chainKey);
   const chainTokens = useMemo(
     () => mergeTokenLists([...commonTokens, ...tokens.filter((token) => token.chainKey === chainKey)]),
@@ -724,14 +737,17 @@ export function SwapConsole() {
   );
   const nativeGasSymbol = getNativeGasSymbol(chainKey);
   const expectedChainLabel = chain.label;
-  const walletOnSelectedChain = isWalletOnChain(wallet.chainId, chainKey);
+  const selectedWalletKind = isSolanaSelected ? 'solana' : 'evm';
+  const walletOnSelectedChain = isSolanaSelected
+    ? wallet.kind === 'solana' && wallet.connected
+    : wallet.kind === 'evm' && isWalletOnChain(wallet.chainId, chainKey);
 
   const fromToken = useMemo(
-    () => chainTokens.find((token) => isSameToken(token.address, fromAddress)) || getDefaultFromToken(chainKey),
+    () => chainTokens.find((token) => isSameToken(token.address, fromAddress, chainKey)) || getDefaultFromToken(chainKey),
     [chainKey, chainTokens, fromAddress]
   );
   const toToken = useMemo(
-    () => chainTokens.find((token) => isSameToken(token.address, toAddress)) || getDefaultToToken(chainKey),
+    () => chainTokens.find((token) => isSameToken(token.address, toAddress, chainKey)) || getDefaultToToken(chainKey),
     [chainKey, chainTokens, toAddress]
   );
 
@@ -746,12 +762,17 @@ export function SwapConsole() {
 
   const feePercent = getConfiguredFeePercent();
   const referrerAddress = getConfiguredReferrerAddress();
+  const solanaReferrerAddress = getConfiguredSolanaReferrerAddress();
   const configError = useMemo(() => {
     if (!isSupportedSwapChain(chainKey)) return `${chain.label} 暂未开放`;
     if (Number(feePercent) !== Number(REQUIRED_OKX_FEE_PERCENT)) return '费率必须为 0.01%';
+    if (isSolanaSelected) {
+      if (!solanaReferrerAddress || !isValidSolanaAddress(solanaReferrerAddress)) return '缺 Solana 手续费地址';
+      return null;
+    }
     if (!isValidEvmAddress(referrerAddress)) return '缺手续费地址';
     return null;
-  }, [chain.label, chainKey, feePercent, referrerAddress]);
+  }, [chain.label, chainKey, feePercent, isSolanaSelected, referrerAddress, solanaReferrerAddress]);
 
   const fromBalance = balances[tokenStorageKey(fromToken)] || null;
   const toBalance = balances[tokenStorageKey(toToken)] || null;
@@ -780,7 +801,9 @@ export function SwapConsole() {
 
   const primaryIssue = useMemo(() => {
     if (!wallet.connected) return '连接钱包';
-    if (!walletOnSelectedChain) return `切换 ${expectedChainLabel}`;
+    if (isSolanaSelected && wallet.kind !== 'solana') return '连接 Solana 钱包';
+    if (!isSolanaSelected && wallet.kind !== 'evm') return '连接 EVM 钱包';
+    if (!walletOnSelectedChain) return isSolanaSelected ? '连接 Solana 钱包' : `切换 ${expectedChainLabel}`;
     if (!okxClient.isReady) return '设置 OKX';
     if (configError) return configError;
     if (!isPositiveAmount(amount)) return '输入数量';
@@ -799,13 +822,15 @@ export function SwapConsole() {
     okxClient.isReady,
     quote,
     quoteLoading,
+    isSolanaSelected,
     wallet.connected,
+    wallet.kind,
     walletOnSelectedChain,
   ]);
 
   const outputAmount = quote ? formatTokenUnits(quote.toTokenAmount, toToken.decimals, 8) : '';
   const actionableIssues = useMemo(
-    () => new Set(['连接钱包', `切换 ${expectedChainLabel}`, '设置 OKX', '获取报价']),
+    () => new Set(['连接钱包', '连接 Solana 钱包', '连接 EVM 钱包', `切换 ${expectedChainLabel}`, '设置 OKX', '获取报价']),
     [expectedChainLabel]
   );
 
@@ -839,28 +864,32 @@ export function SwapConsole() {
 
   useEffect(() => {
     let mounted = true;
-    getWalletState()
+    const readState = chainKey === 'solana' ? getSolanaWalletState() : getWalletState();
+    readState
       .then((state) => {
-        if (mounted) setWallet(state);
+        if (mounted && (state.connected || wallet.kind !== selectedWalletKind)) setWallet(state);
       })
       .catch(() => undefined);
     return () => {
       mounted = false;
     };
-  }, []);
+  }, [chainKey, selectedWalletKind, wallet.kind]);
 
   useEffect(() => {
     const provider = getInjectedProvider();
     if (!provider?.on) return;
     const handleAccountsChanged = (accountsValue: unknown) => {
+      if (chainKey === 'solana') return;
       const accounts = Array.isArray(accountsValue) ? accountsValue : [];
       setWallet((current) => ({
         ...current,
         address: typeof accounts[0] === 'string' ? accounts[0] : null,
         connected: typeof accounts[0] === 'string',
+        kind: typeof accounts[0] === 'string' ? 'evm' : null,
       }));
     };
     const handleChainChanged = (chainIdValue: unknown) => {
+      if (chainKey === 'solana') return;
       const chainIdHex = String(chainIdValue || '0x0');
       setWallet((current) => ({
         ...current,
@@ -873,7 +902,39 @@ export function SwapConsole() {
       provider.removeListener?.('accountsChanged', handleAccountsChanged);
       provider.removeListener?.('chainChanged', handleChainChanged);
     };
-  }, []);
+  }, [chainKey]);
+
+  useEffect(() => {
+    const provider = getInjectedSolanaProvider();
+    if (!provider?.on) return;
+    const handleConnect = (publicKeyValue: unknown) => {
+      if (chainKey !== 'solana') return;
+      const address = publicKeyValue && typeof publicKeyValue === 'object' && 'toString' in publicKeyValue
+        ? publicKeyValue.toString()
+        : typeof publicKeyValue === 'string'
+          ? publicKeyValue
+          : provider.publicKey?.toString() || null;
+      setWallet({
+        address,
+        chainId: null,
+        connected: Boolean(address),
+        kind: address ? 'solana' : null,
+      });
+    };
+    const handleDisconnect = () => {
+      if (chainKey !== 'solana') return;
+      setWallet(emptyWalletState());
+      setBalances({});
+    };
+    provider.on('connect', handleConnect);
+    provider.on('disconnect', handleDisconnect);
+    provider.on('accountChanged', handleConnect);
+    return () => {
+      provider.removeListener?.('connect', handleConnect);
+      provider.removeListener?.('disconnect', handleDisconnect);
+      provider.removeListener?.('accountChanged', handleConnect);
+    };
+  }, [chainKey]);
 
   useEffect(() => {
     const defaultFromToken = getDefaultFromToken(chainKey);
@@ -889,13 +950,22 @@ export function SwapConsole() {
     setExecutionError(null);
   }, [chainKey]);
 
+  useEffect(() => {
+    setWallet((current) => (
+      current.connected && current.kind === selectedWalletKind
+        ? current
+        : emptyWalletState()
+    ));
+    setBalances({});
+  }, [selectedWalletKind]);
+
   const addTokens = useCallback((incoming: TokenInfo[]) => {
     if (!incoming.length) return;
     setTokens((current) => mergeTokenLists([...current, ...incoming]));
   }, []);
 
   const refreshBalances = useCallback(async () => {
-    if (!wallet.address || !isSupportedSwapChain(chainKey)) return;
+    if (!wallet.address || !isSupportedSwapChain(chainKey) || (isSolanaSelected && wallet.kind !== 'solana') || (!isSolanaSelected && wallet.kind !== 'evm')) return;
     const requestId = ++balanceRequestIdRef.current;
     const tokenList = mergeTokenLists([...commonTokens, fromToken, toToken]);
     try {
@@ -913,7 +983,7 @@ export function SwapConsole() {
     } catch {
       if (requestId === balanceRequestIdRef.current) setBalances({});
     }
-  }, [chainKey, commonTokens, fromToken, toToken, wallet.address]);
+  }, [chainKey, commonTokens, fromToken, isSolanaSelected, toToken, wallet.address, wallet.kind]);
 
   useEffect(() => {
     refreshBalances();
@@ -925,7 +995,7 @@ export function SwapConsole() {
     if (!isSupportedSwapChain(chainKey) || !okxClient.isReady || !isPositiveAmount(amount) || !amountRaw) {
       return;
     }
-    if (isSameToken(fromToken.address, toToken.address)) {
+    if (isSameToken(fromToken.address, toToken.address, chainKey)) {
       setQuoteError('代币相同');
       return;
     }
@@ -983,11 +1053,11 @@ export function SwapConsole() {
   const handleConnect = useCallback(async () => {
     setExecutionError(null);
     try {
-      setWallet(await connectWallet());
+      setWallet(isSolanaSelected ? await connectSolanaWallet() : await connectWallet());
     } catch (error) {
       setExecutionError(readErrorMessage(error, '连接失败'));
     }
-  }, []);
+  }, [isSolanaSelected]);
 
   const handleSwitchChain = useCallback(async () => {
     setExecutionError(null);
@@ -1000,7 +1070,7 @@ export function SwapConsole() {
   }, [chainKey]);
 
   const handleDisconnect = useCallback(() => {
-    setWallet({ address: null, chainId: null, connected: false });
+    setWallet(emptyWalletState());
     setBalances({});
   }, []);
 
@@ -1008,7 +1078,7 @@ export function SwapConsole() {
     if (!fromBalance) return;
     try {
       let raw = BigInt(fromBalance.raw);
-      if (isNativeToken(fromToken.address)) {
+      if (isNativeToken(fromToken.address, chainKey)) {
         const reserve = parseTokenAmount(DEFAULT_NATIVE_GAS_RESERVE, fromToken.decimals);
         raw = raw > reserve ? raw - reserve : 0n;
       }
@@ -1031,7 +1101,19 @@ export function SwapConsole() {
       await handleConnect();
       return;
     }
+    if (isSolanaSelected && wallet.kind !== 'solana') {
+      await handleConnect();
+      return;
+    }
+    if (!isSolanaSelected && wallet.kind !== 'evm') {
+      await handleConnect();
+      return;
+    }
     if (!walletOnSelectedChain) {
+      if (isSolanaSelected) {
+        await handleConnect();
+        return;
+      }
       await handleSwitchChain();
       return;
     }
@@ -1048,10 +1130,12 @@ export function SwapConsole() {
     fetchQuote,
     handleConnect,
     handleSwitchChain,
+    isSolanaSelected,
     okxClient.isReady,
     primaryIssue,
     quote,
     wallet.connected,
+    wallet.kind,
     walletOnSelectedChain,
   ]);
 
@@ -1068,7 +1152,38 @@ export function SwapConsole() {
     setExecutionLoading(true);
     setExecutionError(null);
     try {
-      if (!isNativeToken(fromToken.address)) {
+      if (isSolanaSelected) {
+        const swap = await okxClient.getSolanaSwapInstructions({
+          fromTokenAddress: fromToken.address,
+          toTokenAddress: toToken.address,
+          amount: amountRaw,
+          slippagePercent: slippage,
+          userWalletAddress: wallet.address,
+          feePercent: REQUIRED_OKX_FEE_PERCENT,
+          fromTokenReferrerWalletAddress: solanaReferrerAddress,
+        });
+        const signature = await sendSolanaSwapInstructions({
+          instructions: swap.instructionLists,
+          addressLookupTableAccounts: swap.addressLookupTableAccount,
+          walletAddress: wallet.address,
+        });
+        const swapId = `swap:${signature}`;
+        upsertHistory({
+          id: swapId,
+          type: 'swap',
+          status: 'success',
+          hash: signature,
+          title: `${fromToken.symbol} -> ${toToken.symbol}`,
+          createdAt: nowTimeLabel(),
+          explorerUrl: buildExplorerUrl(chainKey, signature),
+        });
+        setConfirmOpen(false);
+        await refreshBalances();
+        await fetchQuote();
+        return;
+      }
+
+      if (!isNativeToken(fromToken.address, chainKey)) {
         const approval = await okxClient.getApproveTransaction({
           chainKey,
           tokenContractAddress: fromToken.address,
@@ -1078,7 +1193,7 @@ export function SwapConsole() {
         if (!spender) throw new Error('OKX 授权地址为空');
         const allowance = await readAllowance(fromToken.address, wallet.address, spender, chainKey);
         if (allowance < BigInt(amountRaw)) {
-          const approveTx = await approveToken(fromToken.address, spender, BigInt(amountRaw));
+          const approveTx = await approveToken(fromToken.address, spender, BigInt(amountRaw), chainKey);
           const approveId = `approve:${approveTx.hash}`;
           upsertHistory({
             id: approveId,
@@ -1134,11 +1249,13 @@ export function SwapConsole() {
     fetchQuote,
     fromToken.address,
     fromToken.symbol,
+    isSolanaSelected,
     okxClient,
     quote,
     refreshBalances,
     referrerAddress,
     slippage,
+    solanaReferrerAddress,
     toToken.address,
     toToken.symbol,
     updateHistoryStatus,
@@ -1179,11 +1296,11 @@ export function SwapConsole() {
                 </IconButton>
                 <button
                 type="button"
-                onClick={wallet.connected ? handleDisconnect : handleConnect}
+              onClick={wallet.connected ? handleDisconnect : handleConnect}
                 className="flex h-9 max-w-[220px] items-center gap-2 rounded-lg border border-white/[0.08] bg-white/[0.045] px-3 text-sm text-white/72 transition hover:bg-white/[0.08] active:translate-y-px"
               >
                 <Wallet className="h-4 w-4 shrink-0" />
-                <span className="truncate">{wallet.address ? shortAddress(wallet.address) : '连接钱包'}</span>
+                <span className="truncate">{wallet.address ? shortAddress(wallet.address) : (isSolanaSelected ? '连接 Solana' : '连接钱包')}</span>
               </button>
               </div>
             </div>

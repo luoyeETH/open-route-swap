@@ -62,6 +62,30 @@ export type OkxSwapTransaction = {
   raw: unknown;
 };
 
+export type OkxSolanaInstructionAccount = {
+  pubkey: string;
+  isSigner: boolean;
+  isWritable: boolean;
+};
+
+export type OkxSolanaInstruction = {
+  programId: string;
+  data: string;
+  accounts: OkxSolanaInstructionAccount[];
+};
+
+export type OkxSolanaSwapInstructions = {
+  instructionLists: OkxSolanaInstruction[];
+  addressLookupTableAccount: string[];
+  routerResult: {
+    fromTokenAmount: string;
+    toTokenAmount: string;
+    routes: OkxRoute[];
+  };
+  priceImpactPercent: string | null;
+  raw: unknown;
+};
+
 export type OkxTokenBalance = TokenInfo & {
   balance: string;
   valueUsd: number | null;
@@ -125,8 +149,11 @@ function dataArray(result: OkxEnvelope): unknown[] {
 }
 
 function firstDataObject(result: OkxEnvelope): Record<string, unknown> | null {
+  if (result.data && typeof result.data === 'object' && !Array.isArray(result.data)) {
+    return result.data as Record<string, unknown>;
+  }
   const first = dataArray(result)[0];
-  return first && typeof first === 'object' ? (first as Record<string, unknown>) : null;
+  return first && typeof first === 'object' && !Array.isArray(first) ? (first as Record<string, unknown>) : null;
 }
 
 function readString(record: Record<string, unknown>, keys: string[], fallback = ''): string {
@@ -172,6 +199,37 @@ function parseBoolean(value: unknown): boolean | null {
   return null;
 }
 
+function readStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((entry) => String(entry ?? '').trim())
+    .filter(Boolean);
+}
+
+function parseSolanaInstruction(value: unknown): OkxSolanaInstruction | null {
+  if (!value || typeof value !== 'object') return null;
+  const record = value as Record<string, unknown>;
+  const programId = readString(record, ['programId']);
+  const data = readString(record, ['data']);
+  if (!programId) return null;
+
+  const accounts = Array.isArray(record.accounts)
+    ? record.accounts.flatMap((entry) => {
+      if (!entry || typeof entry !== 'object') return [];
+      const account = entry as Record<string, unknown>;
+      const pubkey = readString(account, ['pubkey', 'publicKey']);
+      if (!pubkey) return [];
+      return [{
+        pubkey,
+        isSigner: parseBoolean(account.isSigner) === true,
+        isWritable: parseBoolean(account.isWritable) === true,
+      }];
+    })
+    : [];
+
+  return { programId, data, accounts };
+}
+
 function flattenTokenRecords(data: unknown): Record<string, unknown>[] {
   if (!Array.isArray(data)) return [];
   const records: Record<string, unknown>[] = [];
@@ -198,8 +256,8 @@ function parseToken(record: Record<string, unknown>, chainKey: ChainKey): TokenI
     'address',
     'contractAddress',
     'tokenAddress',
-  ]));
-  const fallbackSymbol = isNativeToken(address) ? getChainNativeSymbol(chainKey) || 'NATIVE' : 'TOKEN';
+  ]), chainKey);
+  const fallbackSymbol = isNativeToken(address, chainKey) ? getChainNativeSymbol(chainKey) || 'NATIVE' : 'TOKEN';
   const symbol = readString(record, ['tokenSymbol', 'symbol', 'ticker'], fallbackSymbol).toUpperCase();
   const name = readString(record, ['tokenName', 'name'], symbol);
   const decimals = readNumber(record, ['decimals', 'decimal', 'tokenDecimal'], 18);
@@ -342,8 +400,8 @@ export class OkxClient {
     const chain = CHAIN_CONFIGS[params.chainKey];
     const query = new URLSearchParams({
       chainIndex: chain.chainIndex,
-      fromTokenAddress: normalizeTokenAddress(params.fromTokenAddress),
-      toTokenAddress: normalizeTokenAddress(params.toTokenAddress),
+      fromTokenAddress: normalizeTokenAddress(params.fromTokenAddress, params.chainKey),
+      toTokenAddress: normalizeTokenAddress(params.toTokenAddress, params.chainKey),
       amount: params.amount,
       slippagePercent: params.slippagePercent,
       swapMode: 'exactIn',
@@ -372,7 +430,7 @@ export class OkxClient {
     const chain = CHAIN_CONFIGS[params.chainKey];
     const query = new URLSearchParams({
       chainIndex: chain.chainIndex,
-      tokenContractAddress: normalizeTokenAddress(params.tokenContractAddress),
+      tokenContractAddress: normalizeTokenAddress(params.tokenContractAddress, params.chainKey),
       approveAmount: params.approveAmount,
     });
     const result = await this.request('GET', '/api/v6/dex/aggregator/approve-transaction', query);
@@ -399,8 +457,8 @@ export class OkxClient {
     const chain = CHAIN_CONFIGS[params.chainKey];
     const query = new URLSearchParams({
       chainIndex: chain.chainIndex,
-      fromTokenAddress: normalizeTokenAddress(params.fromTokenAddress),
-      toTokenAddress: normalizeTokenAddress(params.toTokenAddress),
+      fromTokenAddress: normalizeTokenAddress(params.fromTokenAddress, params.chainKey),
+      toTokenAddress: normalizeTokenAddress(params.toTokenAddress, params.chainKey),
       amount: params.amount,
       slippagePercent: params.slippagePercent,
       userWalletAddress: params.userWalletAddress,
@@ -431,6 +489,57 @@ export class OkxClient {
         value: readString(tx, ['value'], '0'),
         gas: readString(tx, ['gas', 'gasLimit'], '') || null,
       },
+      routerResult: {
+        fromTokenAmount: readString(routerResult, ['fromTokenAmount'], params.amount),
+        toTokenAmount: readString(routerResult, ['toTokenAmount'], '0'),
+        routes: parseRoutes(routerResult.dexRouterList),
+      },
+      priceImpactPercent: readString(routerResult, ['priceImpactPercent'], '') || readString(swap, ['priceImpactPercent'], '') || null,
+      raw: swap,
+    };
+  }
+
+  async getSolanaSwapInstructions(params: {
+    fromTokenAddress: string;
+    toTokenAddress: string;
+    amount: string;
+    slippagePercent: string;
+    userWalletAddress: string;
+    fromTokenReferrerWalletAddress: string;
+    feePercent?: string;
+  }): Promise<OkxSolanaSwapInstructions> {
+    const chain = CHAIN_CONFIGS.solana;
+    const query = new URLSearchParams({
+      chainIndex: chain.chainIndex,
+      fromTokenAddress: normalizeTokenAddress(params.fromTokenAddress, 'solana'),
+      toTokenAddress: normalizeTokenAddress(params.toTokenAddress, 'solana'),
+      amount: params.amount,
+      slippagePercent: params.slippagePercent,
+      userWalletAddress: params.userWalletAddress,
+      autoSlippage: 'false',
+      pathNum: '3',
+      feePercent: params.feePercent || REQUIRED_OKX_FEE_PERCENT,
+      fromTokenReferrerWalletAddress: params.fromTokenReferrerWalletAddress,
+    });
+    const result = await this.request('GET', '/api/v6/dex/aggregator/swap-instruction', query);
+    assertOkxSuccess(result);
+    const swap = firstDataObject(result);
+    if (!swap) throw new Error('OKX 未返回 Solana 交易指令');
+
+    const instructionLists = Array.isArray(swap.instructionLists)
+      ? swap.instructionLists
+        .map(parseSolanaInstruction)
+        .filter((instruction): instruction is OkxSolanaInstruction => Boolean(instruction))
+      : [];
+    if (!instructionLists.length) throw new Error('OKX Solana 指令为空');
+
+    const routerResult = swap.routerResult && typeof swap.routerResult === 'object'
+      ? (swap.routerResult as Record<string, unknown>)
+      : {};
+
+    return {
+      instructionLists,
+      addressLookupTableAccount: readStringArray(swap.addressLookupTableAccount),
       routerResult: {
         fromTokenAmount: readString(routerResult, ['fromTokenAmount'], params.amount),
         toTokenAmount: readString(routerResult, ['toTokenAmount'], '0'),
