@@ -121,7 +121,7 @@ function BrowserWalletProviders({ children }: { children: ReactNode }) {
           theme={midnightTheme({
             accentColor: '#2dd4bf',
             accentColorForeground: '#042f2e',
-            borderRadius: 'small',
+            borderRadius: 'medium',
             fontStack: 'system',
             overlayBlur: 'small',
           })}

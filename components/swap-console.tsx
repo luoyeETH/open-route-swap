@@ -366,7 +366,7 @@ function IconButton({
       title={title}
       onClick={onClick}
       disabled={disabled}
-      className="flex h-9 w-9 items-center justify-center rounded-lg border border-white/[0.08] bg-white/[0.045] text-white/70 transition hover:bg-white/[0.08] hover:text-white active:translate-y-px disabled:cursor-not-allowed disabled:opacity-40"
+      className="flex h-9 w-9 items-center justify-center rounded-lg border border-white/[0.1] bg-white/[0.055] text-white/70 transition hover:bg-white/[0.08] hover:text-white active:translate-y-px disabled:cursor-not-allowed disabled:opacity-40"
     >
       {children}
     </button>
@@ -406,14 +406,14 @@ function ChainDropdown({
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className="flex h-9 max-w-[130px] items-center gap-1.5 rounded-lg border border-white/[0.12] bg-[#151c23] px-2.5 text-sm font-medium text-white outline-none transition hover:bg-[#1a222b] sm:max-w-[170px]"
+        className="flex h-9 max-w-[130px] items-center gap-1.5 rounded-lg border border-white/[0.12] bg-[#1a2130] px-2.5 text-sm font-medium text-white outline-none transition hover:bg-[#1a222b] sm:max-w-[170px]"
         title="选择链"
       >
         <span className="truncate">{CHAIN_CONFIGS[value].label}</span>
         <ChevronDown className={`h-3.5 w-3.5 shrink-0 text-white/50 transition-transform ${open ? 'rotate-180' : ''}`} />
       </button>
       {open && (
-        <div className="absolute right-0 top-full z-50 mt-1 min-w-[160px] overflow-hidden rounded-xl border border-white/[0.1] bg-[#151c23] py-1 shadow-lg shadow-black/40">
+        <div className="absolute right-0 top-full z-50 mt-1 min-w-[160px] overflow-hidden rounded-lg border border-white/[0.1] bg-[#1a2130] py-1 shadow-md shadow-black/30">
           {SELECTABLE_CHAIN_KEYS.map((key) => (
             <button
               key={key}
@@ -451,7 +451,7 @@ function TokenSelectButton({
     <button
       type="button"
       onClick={onClick}
-      className="flex max-w-[150px] items-center gap-2 rounded-xl border border-white/[0.08] bg-white/[0.055] px-2.5 py-2 text-left transition hover:bg-white/[0.09] active:translate-y-px"
+      className="flex max-w-[150px] items-center gap-2 rounded-lg border border-white/[0.1] bg-white/[0.055] px-2.5 py-2 text-left transition hover:bg-white/[0.09] active:translate-y-px"
     >
       <TokenAvatar token={token} size={26} />
       <span className="min-w-0">
@@ -484,7 +484,7 @@ function TokenAmountPanel({
   disabled?: boolean;
 }) {
   return (
-    <div className="soft-inset rounded-2xl p-3">
+    <div className="soft-inset rounded-lg p-3">
       <div className="mb-2 flex items-center justify-between gap-3">
         <FieldLabel>{label}</FieldLabel>
         <div className="flex min-w-0 items-center gap-2 text-[11px] text-white/42">
@@ -663,7 +663,7 @@ function TokenSelectorSheet({
     <div className="fixed inset-0 z-40 flex items-end justify-center sm:items-center" onClick={onClose}>
       <div className="absolute inset-0 bg-black/62 backdrop-blur-sm" />
       <div
-        className="sheet-enter relative max-h-[76dvh] w-full max-w-[440px] overflow-hidden rounded-t-2xl border border-white/[0.08] bg-[#11171d] shadow-soft sm:rounded-2xl"
+        className="sheet-enter relative max-h-[76dvh] w-full max-w-[440px] overflow-hidden rounded-t-xl border border-white/[0.1] bg-[#141a22] shadow-soft sm:rounded-lg"
         onClick={(event) => event.stopPropagation()}
       >
         <div className="flex items-center justify-between border-b border-white/[0.07] px-4 py-3">
@@ -673,7 +673,7 @@ function TokenSelectorSheet({
           </IconButton>
         </div>
         <div className="border-b border-white/[0.07] p-4">
-          <div className="flex items-center gap-2 rounded-xl border border-white/[0.08] bg-white/[0.045] px-3 py-2">
+          <div className="flex items-center gap-2 rounded-lg border border-white/[0.1] bg-white/[0.055] px-3 py-2">
             <Search className="h-4 w-4 text-white/38" />
             <input
               ref={inputRef}
@@ -698,9 +698,9 @@ function TokenSelectorSheet({
         <div className="max-h-[52dvh] overflow-y-auto p-2">
           {listLoading ? (
             <div className="space-y-2 p-2">
-              <div className="skeleton h-12 rounded-xl" />
-              <div className="skeleton h-12 rounded-xl" />
-              <div className="skeleton h-12 rounded-xl" />
+              <div className="skeleton h-12 rounded-lg" />
+              <div className="skeleton h-12 rounded-lg" />
+              <div className="skeleton h-12 rounded-lg" />
             </div>
           ) : visibleTokens.length > 0 ? (
             visibleTokens.map((token) => {
@@ -716,7 +716,7 @@ function TokenSelectorSheet({
                     onSelect(token);
                     onClose();
                   }}
-                  className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition hover:bg-white/[0.055] disabled:cursor-not-allowed disabled:opacity-35"
+                  className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left transition hover:bg-white/[0.055] disabled:cursor-not-allowed disabled:opacity-35"
                 >
                   <TokenAvatar token={token} />
                   <span className="min-w-0 flex-1">
@@ -780,7 +780,7 @@ function SettingsSheet({
     <div className="fixed inset-0 z-40 flex items-end justify-center sm:items-center" onClick={onClose}>
       <div className="absolute inset-0 bg-black/62 backdrop-blur-sm" />
       <div
-        className="sheet-enter relative w-full max-w-[460px] rounded-t-2xl border border-white/[0.08] bg-[#11171d] shadow-soft sm:rounded-2xl"
+        className="sheet-enter relative w-full max-w-[460px] rounded-t-xl border border-white/[0.1] bg-[#141a22] shadow-soft sm:rounded-lg"
         onClick={(event) => event.stopPropagation()}
       >
         <div className="flex items-center justify-between border-b border-white/[0.07] px-4 py-3">
@@ -797,10 +797,10 @@ function SettingsSheet({
                 key={item.value}
                 disabled={item.disabled}
                 onClick={() => onModeChange(item.value)}
-                className={`rounded-xl border px-3 py-2 text-sm transition active:translate-y-px disabled:cursor-not-allowed disabled:opacity-35 ${
+                className={`rounded-lg border px-3 py-2 text-sm transition active:translate-y-px disabled:cursor-not-allowed disabled:opacity-35 ${
                   mode === item.value
                     ? 'border-teal-300/35 bg-teal-300/12 text-teal-100'
-                    : 'border-white/[0.08] bg-white/[0.04] text-white/62 hover:bg-white/[0.07]'
+                    : 'border-white/[0.1] bg-white/[0.04] text-white/62 hover:bg-white/[0.07]'
                 }`}
               >
                 {item.label}
@@ -827,14 +827,14 @@ function SettingsSheet({
                 value={credentials.passphrase}
                 onChange={(value) => onCredentialsChange({ ...credentials, passphrase: value })}
               />
-              <div className="rounded-xl border border-amber-200/16 bg-amber-200/[0.06] px-3 py-2 text-xs text-amber-100/80">
+              <div className="rounded-lg border border-amber-200/16 bg-amber-200/[0.06] px-3 py-2 text-xs text-amber-100/80">
                 Secret 仅会话保存。浏览器不可保护 Secret。
               </div>
               <div className="flex gap-2">
-                <button type="button" onClick={onSaveCredentials} className="button-primary h-10 flex-1 rounded-xl text-sm font-semibold transition active:translate-y-px">
+                <button type="button" onClick={onSaveCredentials} className="button-primary h-10 flex-1 rounded-lg text-sm font-semibold transition active:translate-y-px">
                   保存
                 </button>
-                <button type="button" onClick={onClearCredentials} className="h-10 rounded-xl border border-white/[0.08] px-4 text-sm text-white/68 transition hover:bg-white/[0.06] active:translate-y-px">
+                <button type="button" onClick={onClearCredentials} className="h-10 rounded-lg border border-white/[0.1] px-4 text-sm text-white/68 transition hover:bg-white/[0.06] active:translate-y-px">
                   清除
                 </button>
               </div>
@@ -844,14 +844,14 @@ function SettingsSheet({
           {mode === 'signer-proxy' ? (
             <div className="space-y-3">
               <InputBlock label="Proxy URL" value={signerProxyUrl} onChange={onSignerProxyUrlChange} />
-              <div className="rounded-xl border border-white/[0.08] bg-white/[0.04] px-3 py-2 text-xs text-white/50">
+              <div className="rounded-lg border border-white/[0.1] bg-white/[0.04] px-3 py-2 text-xs text-white/50">
                 Proxy 只签 OKX 请求，不签链上交易。
               </div>
             </div>
           ) : null}
 
           {mode === 'env-demo' ? (
-            <div className="rounded-xl border border-amber-200/16 bg-amber-200/[0.06] px-3 py-2 text-xs text-amber-100/80">
+            <div className="rounded-lg border border-amber-200/16 bg-amber-200/[0.06] px-3 py-2 text-xs text-amber-100/80">
               Env Demo 仅开发用。公开变量不保护 Secret。
             </div>
           ) : null}
@@ -877,7 +877,7 @@ function SlippageControl({
   onMaxAutoSlippageChange: (value: string) => void;
 }) {
   return (
-    <div className="mt-3 rounded-xl border border-white/[0.08] bg-white/[0.035] p-1">
+    <div className="mt-3 rounded-lg border border-white/[0.1] bg-white/[0.05] p-1">
       <div className="flex items-center gap-1">
         {SLIPPAGE_PRESETS.map((value) => (
           <button
@@ -889,7 +889,7 @@ function SlippageControl({
             }}
             className={`mono-num h-8 flex-1 rounded-lg text-xs transition active:translate-y-px ${
               !autoSlippage && slippage === value
-                ? 'border border-white/[0.12] bg-[#374151] text-white shadow-inset'
+                ? 'border border-white/[0.12] bg-[#374151] text-white '
                 : 'border border-transparent text-white/45 hover:bg-[#242c35] hover:text-white/72'
             }`}
           >
@@ -903,11 +903,11 @@ function SlippageControl({
             onSlippageChange(normalizeDecimalInput(event.target.value));
           }}
           aria-label="固定滑点"
-          className="mono-num h-8 w-14 rounded-lg border border-white/[0.06] bg-white/[0.04] px-2 text-center text-xs text-white outline-none focus:border-teal-300/35 sm:w-16"
+          className="mono-num h-8 w-14 rounded-lg border border-white/[0.08] bg-white/[0.04] px-2 text-center text-xs text-white outline-none focus:border-teal-300/35 sm:w-16"
         />
       </div>
 
-      <div className="mt-1 flex flex-col gap-2 rounded-lg border border-white/[0.06] bg-[#11171d]/60 px-2 py-2 min-[420px]:flex-row min-[420px]:items-center">
+      <div className="mt-1 flex flex-col gap-2 rounded-lg border border-white/[0.08] bg-[#141a22]/60 px-2 py-2 min-[420px]:flex-row min-[420px]:items-center">
         <button
           type="button"
           onClick={() => onAutoSlippageChange(!autoSlippage)}
@@ -917,7 +917,7 @@ function SlippageControl({
           <span className={`flex h-5 w-9 shrink-0 items-center rounded-full border p-0.5 transition ${
             autoSlippage
               ? 'justify-end border-teal-300/35 bg-teal-300/20'
-              : 'justify-start border-white/[0.1] bg-white/[0.045]'
+              : 'justify-start border-white/[0.1] bg-white/[0.055]'
           }`}
           >
             <span className={`h-4 w-4 rounded-full transition ${autoSlippage ? 'bg-teal-200' : 'bg-white/45'}`} />
@@ -938,7 +938,7 @@ function SlippageControl({
             disabled={!autoSlippage}
             inputMode="decimal"
             aria-label="自动滑点上限"
-            className="mono-num h-8 w-16 rounded-lg border border-white/[0.06] bg-white/[0.04] px-2 text-center text-xs text-white outline-none transition focus:border-teal-300/35 disabled:text-white/32"
+            className="mono-num h-8 w-16 rounded-lg border border-white/[0.08] bg-white/[0.04] px-2 text-center text-xs text-white outline-none transition focus:border-teal-300/35 disabled:text-white/32"
           />
           <span>%</span>
         </label>
@@ -965,7 +965,7 @@ function InputBlock({
         type={type}
         value={value}
         onChange={(event) => onChange(event.target.value)}
-        className="h-10 w-full rounded-xl border border-white/[0.08] bg-white/[0.045] px-3 text-sm text-white outline-none transition placeholder:text-white/24 focus:border-teal-300/35"
+        className="h-10 w-full rounded-lg border border-white/[0.1] bg-white/[0.055] px-3 text-sm text-white outline-none transition placeholder:text-white/24 focus:border-teal-300/35"
       />
     </label>
   );
@@ -998,7 +998,7 @@ function ConfirmSwapModal({
     <div className="fixed inset-0 z-40 flex items-end justify-center sm:items-center" onClick={loading ? undefined : onClose}>
       <div className="absolute inset-0 bg-black/62 backdrop-blur-sm" />
       <div
-        className="sheet-enter relative w-full max-w-[420px] rounded-t-2xl border border-white/[0.08] bg-[#11171d] shadow-soft sm:rounded-2xl"
+        className="sheet-enter relative w-full max-w-[420px] rounded-t-xl border border-white/[0.1] bg-[#141a22] shadow-soft sm:rounded-lg"
         onClick={(event) => event.stopPropagation()}
       >
         <div className="flex items-center justify-between border-b border-white/[0.07] px-4 py-3">
@@ -1008,7 +1008,7 @@ function ConfirmSwapModal({
           </IconButton>
         </div>
         <div className="space-y-3 p-4">
-          <div className="soft-inset rounded-2xl p-3">
+          <div className="soft-inset rounded-lg p-3">
             <div className="mono-num text-lg font-semibold">
               {amount || '0'} {fromToken.symbol}
             </div>
@@ -1017,11 +1017,11 @@ function ConfirmSwapModal({
             </div>
           </div>
           <div className="grid grid-cols-2 gap-2 text-xs text-white/50">
-            <div className="soft-inset rounded-xl p-3">
+            <div className="soft-inset rounded-lg p-3">
               <div>滑点</div>
               <div className="mono-num mt-1 text-white/80">{slippageLabel}</div>
             </div>
-            <div className="soft-inset rounded-xl p-3">
+            <div className="soft-inset rounded-lg p-3">
               <div>平台费</div>
               <div className="mono-num mt-1 text-white/80">{REQUIRED_OKX_FEE_PERCENT}%</div>
             </div>
@@ -1030,7 +1030,7 @@ function ConfirmSwapModal({
             type="button"
             onClick={onConfirm}
             disabled={loading}
-            className="button-primary flex h-11 w-full items-center justify-center gap-2 rounded-xl text-sm font-semibold transition active:translate-y-px disabled:opacity-50"
+            className="button-primary flex h-11 w-full items-center justify-center gap-2 rounded-lg text-sm font-semibold transition active:translate-y-px disabled:opacity-50"
           >
             {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
             {loading ? '处理中' : '确认'}
@@ -1211,7 +1211,7 @@ function KlineModal({
     <div className="fixed inset-0 z-40 flex items-end justify-center sm:items-center" onClick={onClose}>
       <div className="absolute inset-0 bg-black/62 backdrop-blur-sm" />
       <div
-        className="sheet-enter relative flex max-h-[88dvh] w-full max-w-[900px] flex-col overflow-hidden rounded-t-2xl border border-white/[0.08] bg-[#11171d] shadow-soft sm:rounded-2xl"
+        className="sheet-enter relative flex max-h-[88dvh] w-full max-w-[900px] flex-col overflow-hidden rounded-t-xl border border-white/[0.1] bg-[#141a22] shadow-soft sm:rounded-lg"
         onClick={(event) => event.stopPropagation()}
       >
         <div className="flex shrink-0 items-center justify-between gap-3 border-b border-white/[0.07] px-4 py-3">
@@ -1229,19 +1229,19 @@ function KlineModal({
 
         <div className="min-h-0 space-y-3 overflow-y-auto p-3 sm:p-4">
           <div className="grid grid-cols-1 gap-2 min-[360px]:grid-cols-2 sm:grid-cols-[1fr_1fr_auto]">
-            <div className="soft-inset rounded-xl p-3">
+            <div className="soft-inset rounded-lg p-3">
               <div className="text-[11px] text-white/40">最新价</div>
               <div className="mono-num mt-1 text-base font-semibold text-white">
                 {latestCandle ? formatCandlePrice(latestCandle.close) : '--'}
               </div>
             </div>
-            <div className="soft-inset rounded-xl p-3">
+            <div className="soft-inset rounded-lg p-3">
               <div className="text-[11px] text-white/40">区间涨跌幅</div>
               <div className={`mono-num mt-1 text-base font-semibold ${changeIsPositive ? 'text-teal-200' : 'text-rose-200'}`}>
                 {changePercent == null ? '--' : formatPercent(changePercent)}
               </div>
             </div>
-            <div className="grid grid-cols-3 gap-1 rounded-xl border border-white/[0.08] bg-white/[0.035] p-1 min-[360px]:col-span-2 sm:col-span-1">
+            <div className="grid grid-cols-3 gap-1 rounded-lg border border-white/[0.1] bg-white/[0.05] p-1 min-[360px]:col-span-2 sm:col-span-1">
               {CANDLE_BARS.map((value) => (
                 <button
                   type="button"
@@ -1249,7 +1249,7 @@ function KlineModal({
                   onClick={() => setBar(value)}
                   className={`mono-num h-8 min-w-0 rounded-lg px-2 text-xs transition active:translate-y-px ${
                     bar === value
-                      ? 'border border-white/[0.12] bg-[#374151] text-white shadow-inset'
+                      ? 'border border-white/[0.12] bg-[#374151] text-white '
                       : 'border border-transparent text-white/45 hover:bg-[#242c35] hover:text-white/72'
                   }`}
                 >
@@ -1259,11 +1259,11 @@ function KlineModal({
             </div>
           </div>
 
-          <div className="h-[260px] rounded-2xl border border-white/[0.08] bg-white/[0.025] p-2 sm:h-[320px]">
+          <div className="h-[260px] rounded-lg border border-white/[0.1] bg-white/[0.025] p-2 sm:h-[320px]">
             {loading ? (
               <div className="h-full space-y-3 p-3">
                 <div className="skeleton h-7 w-40 rounded-lg" />
-                <div className="skeleton h-[250px] rounded-xl" />
+                <div className="skeleton h-[250px] rounded-lg" />
               </div>
             ) : error ? (
               <div className="flex h-full items-center justify-center px-4 text-center text-sm text-amber-100/82">
@@ -1970,7 +1970,7 @@ export function SwapConsole() {
   return (
     <main className="min-h-[100dvh] overflow-x-hidden px-3 py-4 sm:px-5 sm:py-6">
       <div className="mx-auto w-full max-w-full space-y-4 lg:max-w-[1080px]">
-        <header className="soft-panel rounded-3xl p-3 sm:p-4">
+        <header className="soft-panel rounded-xl p-3 sm:p-4">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex min-w-0 items-center gap-3">
               <SwapLogo />
@@ -1987,7 +1987,7 @@ export function SwapConsole() {
               <button
                 type="button"
                 onClick={handleConnect}
-                className="flex h-9 min-w-0 max-w-[210px] items-center gap-2 rounded-lg border border-white/[0.08] bg-white/[0.045] px-2.5 text-sm text-white/72 transition hover:bg-white/[0.08] active:translate-y-px sm:max-w-[240px] sm:px-3"
+                className="flex h-9 min-w-0 max-w-[210px] items-center gap-2 rounded-lg border border-white/[0.1] bg-white/[0.055] px-2.5 text-sm text-white/72 transition hover:bg-white/[0.08] active:translate-y-px sm:max-w-[240px] sm:px-3"
                 title={wallet.address ? shortAddress(wallet.address) : (isSolanaSelected ? '连接 Solana' : '连接钱包')}
               >
                 <Wallet className="h-4 w-4 shrink-0" />
@@ -2004,7 +2004,7 @@ export function SwapConsole() {
 
         <div className="grid gap-4 lg:grid-cols-[520px_1fr] lg:items-start">
           <section>
-            <div className="soft-panel rounded-3xl p-3">
+            <div className="soft-panel rounded-xl p-3">
               <div className="mb-3 flex items-center justify-between gap-2 px-1 sm:gap-3">
                 <div className="flex min-w-0 items-center gap-2 text-xs text-white/45">
                   <span className={`h-2 w-2 rounded-full ${okxClient.isReady ? 'bg-teal-300' : 'bg-white/22'}`} />
@@ -2038,7 +2038,7 @@ export function SwapConsole() {
                   <button
                     type="button"
                     onClick={handleFlip}
-                    className="-my-1 flex h-10 w-10 items-center justify-center rounded-xl border border-white/[0.08] bg-[#11171d] text-white/62 shadow-inset transition hover:bg-white/[0.08] hover:text-white active:translate-y-px"
+                    className="-my-1 flex h-10 w-10 items-center justify-center rounded-lg border border-white/[0.1] bg-[#141a22] text-white/62 transition hover:bg-white/[0.08] hover:text-white active:translate-y-px"
                     title="翻转"
                   >
                     <ArrowDownUp className="h-4 w-4" />
@@ -2066,7 +2066,7 @@ export function SwapConsole() {
               />
 
               {(configError || quoteError || executionError || highImpact || quote?.isHoneyPot) ? (
-                <div className="mt-3 flex gap-2 rounded-xl border border-amber-200/16 bg-amber-200/[0.055] px-3 py-2 text-xs text-amber-100/82">
+                <div className="mt-3 flex gap-2 rounded-lg border border-amber-200/16 bg-amber-200/[0.055] px-3 py-2 text-xs text-amber-100/82">
                   <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
                   <span className="min-w-0 break-words">
                     {configError || quoteError || executionError || (quote?.isHoneyPot ? '风险代币' : '价格影响偏高')}
@@ -2078,7 +2078,7 @@ export function SwapConsole() {
                 type="button"
                 onClick={handlePrimaryAction}
                 disabled={executionLoading || (primaryIssue != null && !actionableIssues.has(primaryIssue))}
-                className="button-primary mt-3 flex h-11 w-full items-center justify-center gap-2 rounded-2xl text-sm font-bold transition active:translate-y-px disabled:opacity-50 sm:h-12"
+                className="button-primary mt-3 flex h-11 w-full items-center justify-center gap-2 rounded-lg text-sm font-bold transition active:translate-y-px disabled:opacity-50 sm:h-12"
               >
                 {executionLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
                 {executionLoading ? '处理中' : primaryIssue || 'Swap'}
@@ -2087,16 +2087,16 @@ export function SwapConsole() {
           </section>
 
           <aside className="space-y-3 lg:sticky lg:top-4">
-            <section className="soft-panel rounded-3xl p-4">
+            <section className="soft-panel rounded-xl p-4">
               <div className="mb-3 flex items-center justify-between">
                 <h2 className="text-sm font-semibold">报价</h2>
                 <span className="mono-num text-xs text-white/36">{quoteUpdatedAt || '--'}</span>
               </div>
               {quoteLoading ? (
                 <div className="space-y-2">
-                  <div className="skeleton h-9 rounded-xl" />
-                  <div className="skeleton h-9 rounded-xl" />
-                  <div className="skeleton h-9 rounded-xl" />
+                  <div className="skeleton h-9 rounded-lg" />
+                  <div className="skeleton h-9 rounded-lg" />
+                  <div className="skeleton h-9 rounded-lg" />
                 </div>
               ) : quote ? (
                 <div className="divide-y divide-white/[0.07] text-sm">
@@ -2108,13 +2108,13 @@ export function SwapConsole() {
                   <InfoRow label="平台费" value={`${REQUIRED_OKX_FEE_PERCENT}%`} />
                 </div>
               ) : (
-                <div className="rounded-2xl border border-white/[0.08] bg-white/[0.035] px-3 py-8 text-center text-sm text-white/40">
+                <div className="rounded-lg border border-white/[0.1] bg-white/[0.05] px-3 py-8 text-center text-sm text-white/40">
                   暂无报价
                 </div>
               )}
             </section>
 
-            <section className="soft-panel rounded-3xl p-4">
+            <section className="soft-panel rounded-xl p-4">
               <div className="mb-3 flex items-center justify-between">
                 <h2 className="text-sm font-semibold">余额</h2>
                 <button type="button" onClick={refreshBalances} className="text-xs text-teal-100/80 hover:text-teal-100">
@@ -2125,7 +2125,7 @@ export function SwapConsole() {
                 {mergeTokenLists([fromToken, toToken, ...commonTokens.slice(0, 4)]).slice(0, 6).map((token) => {
                   const balance = balances[tokenStorageKey(token)];
                   return (
-                    <div key={tokenStorageKey(token)} className="flex items-center gap-3 rounded-xl border border-white/[0.06] bg-white/[0.03] px-3 py-2">
+                    <div key={tokenStorageKey(token)} className="flex items-center gap-3 rounded-lg border border-white/[0.08] bg-white/[0.04] px-3 py-2">
                       <TokenAvatar token={token} size={26} />
                       <div className="min-w-0 flex-1">
                         <div className="truncate text-sm font-medium">{token.symbol}</div>
@@ -2140,7 +2140,7 @@ export function SwapConsole() {
               </div>
             </section>
 
-            <section className="soft-panel rounded-3xl p-4">
+            <section className="soft-panel rounded-xl p-4">
               <h2 className="mb-3 text-sm font-semibold">记录</h2>
               {history.length ? (
                 <div className="space-y-2">
@@ -2150,7 +2150,7 @@ export function SwapConsole() {
                       href={item.explorerUrl}
                       target="_blank"
                       rel="noreferrer"
-                      className="flex items-center gap-3 rounded-xl border border-white/[0.06] bg-white/[0.03] px-3 py-2 transition hover:bg-white/[0.055]"
+                      className="flex items-center gap-3 rounded-lg border border-white/[0.08] bg-white/[0.04] px-3 py-2 transition hover:bg-white/[0.055]"
                     >
                       <span className={`h-2 w-2 rounded-full ${
                         item.status === 'success' ? 'bg-teal-300' : item.status === 'failed' ? 'bg-rose-300' : 'bg-amber-200'
@@ -2164,7 +2164,7 @@ export function SwapConsole() {
                   ))}
                 </div>
               ) : (
-                <div className="rounded-2xl border border-white/[0.08] bg-white/[0.035] px-3 py-8 text-center text-sm text-white/40">
+                <div className="rounded-lg border border-white/[0.1] bg-white/[0.05] px-3 py-8 text-center text-sm text-white/40">
                   暂无记录
                 </div>
               )}
