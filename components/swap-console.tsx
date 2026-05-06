@@ -73,6 +73,7 @@ import {
 import {
   formatNumber,
   formatPercent,
+  formatUsd,
   formatTokenUnits,
   isPositiveAmount,
   normalizeDecimalInput,
@@ -227,6 +228,17 @@ function okxBalanceToTokenBalance(
     formatted: balance.balance || formatUnits(raw, requestedToken.decimals),
     valueUsd: balance.valueUsd,
   };
+}
+
+function hasPositiveBalance(balance: OkxTokenBalance): boolean {
+  const parsedBalance = Number(balance.balance);
+  if (Number.isFinite(parsedBalance)) return parsedBalance > 0;
+  if (!isRawBalance(balance.rawBalance)) return false;
+  try {
+    return BigInt(balance.rawBalance) > 0n;
+  } catch {
+    return false;
+  }
 }
 
 async function readRpcBalances(
@@ -509,40 +521,98 @@ function TokenSelectorSheet({
   side,
   chainKey,
   tokens,
+  balances,
+  walletAddress,
   selectedAddress,
   disabledAddress,
   okxClient,
   onClose,
   onSelect,
   onTokenDiscovered,
+  onTokenBalancesDiscovered,
 }: {
   open: boolean;
   side: TokenSide;
   chainKey: ChainKey;
   tokens: TokenInfo[];
+  balances: Record<string, TokenBalance>;
+  walletAddress?: string | null;
   selectedAddress: string;
   disabledAddress: string;
   okxClient: OkxClient;
   onClose: () => void;
   onSelect: (token: TokenInfo) => void;
   onTokenDiscovered: (tokens: TokenInfo[]) => void;
+  onTokenBalancesDiscovered: (balances: TokenBalance[]) => void;
 }) {
   const [query, setQuery] = useState('');
   const [remoteTokens, setRemoteTokens] = useState<TokenInfo[]>([]);
+  const [walletTokens, setWalletTokens] = useState<TokenInfo[]>([]);
   const [loading, setLoading] = useState(false);
+  const [walletLoading, setWalletLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [walletError, setWalletError] = useState<string | null>(null);
   const deferredQuery = useDeferredValue(query.trim());
   const inputRef = useRef<HTMLInputElement>(null);
   const requestIdRef = useRef(0);
+  const walletRequestIdRef = useRef(0);
+  const tokensRef = useRef(tokens);
+
+  useEffect(() => {
+    tokensRef.current = tokens;
+  }, [tokens]);
 
   useEffect(() => {
     if (!open) return;
     setQuery('');
     setRemoteTokens([]);
+    setWalletTokens([]);
     setError(null);
+    setWalletError(null);
     const timer = window.setTimeout(() => inputRef.current?.focus(), 80);
     return () => window.clearTimeout(timer);
   }, [open, side]);
+
+  useEffect(() => {
+    if (!open) {
+      walletRequestIdRef.current += 1;
+      setWalletLoading(false);
+      return;
+    }
+
+    const address = walletAddress?.trim();
+    if (!address || !okxClient.isReady || !isSupportedSwapChain(chainKey)) {
+      walletRequestIdRef.current += 1;
+      setWalletTokens([]);
+      setWalletLoading(false);
+      setWalletError(null);
+      return;
+    }
+
+    const requestId = ++walletRequestIdRef.current;
+    setWalletLoading(true);
+    setWalletError(null);
+    okxClient.getTokenBalances(chainKey, address)
+      .then((walletBalances) => {
+        if (requestId !== walletRequestIdRef.current) return;
+        const nextBalances = walletBalances
+          .filter(hasPositiveBalance)
+          .map((balance) => okxBalanceToTokenBalance(balance, tokensRef.current, chainKey));
+        setWalletTokens(nextBalances.map((balance) => ({
+          ...balance.token,
+          source: balance.token.source === 'preset' ? 'preset' : 'wallet',
+        })));
+        onTokenBalancesDiscovered(nextBalances);
+      })
+      .catch((scanError) => {
+        if (requestId !== walletRequestIdRef.current) return;
+        setWalletTokens([]);
+        setWalletError(readErrorMessage(scanError, '持仓加载失败'));
+      })
+      .finally(() => {
+        if (requestId === walletRequestIdRef.current) setWalletLoading(false);
+      });
+  }, [chainKey, okxClient, onTokenBalancesDiscovered, open, walletAddress]);
 
   useEffect(() => {
     if (!open) return;
@@ -575,16 +645,19 @@ function TokenSelectorSheet({
 
   const visibleTokens = useMemo(() => {
     const search = query.trim().toLowerCase();
-    const merged = mergeTokenLists([...tokens, ...remoteTokens]);
+    const merged = mergeTokenLists([...walletTokens, ...tokens, ...remoteTokens]);
     if (!search) return merged;
     return merged.filter((token) => (
       token.symbol.toLowerCase().includes(search)
       || token.name.toLowerCase().includes(search)
       || token.address.toLowerCase().includes(search)
     ));
-  }, [query, remoteTokens, tokens]);
+  }, [query, remoteTokens, tokens, walletTokens]);
 
   if (!open) return null;
+
+  const listLoading = loading && visibleTokens.length === 0;
+  const statusError = error || walletError;
 
   return (
     <div className="fixed inset-0 z-40 flex items-end justify-center sm:items-center" onClick={onClose}>
@@ -610,10 +683,20 @@ function TokenSelectorSheet({
               className="min-w-0 flex-1 bg-transparent text-sm text-white outline-none placeholder:text-white/28"
             />
           </div>
-          {error ? <div className="mt-2 text-xs text-rose-200">{error}</div> : null}
+          <div className="mt-2 flex min-h-4 items-center justify-between gap-3 text-xs">
+            <div className="min-w-0 text-rose-200">{statusError || ''}</div>
+            {walletLoading ? (
+              <div className="flex shrink-0 items-center gap-1.5 text-white/42">
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                <span>扫描持仓</span>
+              </div>
+            ) : walletTokens.length ? (
+              <div className="shrink-0 text-white/36">{walletTokens.length} 个持仓</div>
+            ) : null}
+          </div>
         </div>
         <div className="max-h-[52dvh] overflow-y-auto p-2">
-          {loading ? (
+          {listLoading ? (
             <div className="space-y-2 p-2">
               <div className="skeleton h-12 rounded-xl" />
               <div className="skeleton h-12 rounded-xl" />
@@ -623,6 +706,7 @@ function TokenSelectorSheet({
             visibleTokens.map((token) => {
               const disabled = isSameToken(token.address, disabledAddress, chainKey);
               const selected = isSameToken(token.address, selectedAddress, chainKey);
+              const balance = balances[tokenStorageKey(token)];
               return (
                 <button
                   type="button"
@@ -639,7 +723,14 @@ function TokenSelectorSheet({
                     <span className="block truncate text-sm font-semibold">{token.symbol}</span>
                     <span className="block truncate text-xs text-white/38">{token.name}</span>
                   </span>
-                  <span className="mono-num text-xs text-white/32">{shortAddress(token.address)}</span>
+                  <span className="min-w-[86px] max-w-[118px] shrink-0 text-right">
+                    <span className="mono-num block truncate text-xs text-white/68">
+                      {balance ? formatNumber(balance.formatted, 6) : shortAddress(token.address)}
+                    </span>
+                    {balance?.valueUsd != null ? (
+                      <span className="mono-num block truncate text-[11px] text-white/32">{formatUsd(balance.valueUsd)}</span>
+                    ) : null}
+                  </span>
                   {selected ? <Check className="h-4 w-4 text-teal-200" /> : null}
                 </button>
               );
@@ -1448,6 +1539,18 @@ export function SwapConsole() {
     setTokens((current) => mergeTokenLists([...current, ...incoming]));
   }, []);
 
+  const addTokenBalances = useCallback((incoming: TokenBalance[]) => {
+    if (!incoming.length) return;
+    addTokens(incoming.map((balance) => balance.token));
+    setBalances((current) => {
+      const next = { ...current };
+      for (const balance of incoming) {
+        next[tokenStorageKey(balance.token)] = balance;
+      }
+      return next;
+    });
+  }, [addTokens]);
+
   const clearQuoteState = useCallback(() => {
     quoteRequestIdRef.current += 1;
     setQuote(null);
@@ -2075,11 +2178,14 @@ export function SwapConsole() {
         side={activeTokenSide || 'from'}
         chainKey={chainKey}
         tokens={chainTokens}
+        balances={balances}
+        walletAddress={wallet.address}
         selectedAddress={activeTokenSide === 'to' ? toToken.address : fromToken.address}
         disabledAddress={activeTokenSide === 'to' ? fromToken.address : toToken.address}
         okxClient={okxClient}
         onClose={() => setActiveTokenSide(null)}
         onTokenDiscovered={addTokens}
+        onTokenBalancesDiscovered={addTokenBalances}
         onSelect={(token) => {
           addTokens([token]);
           if (activeTokenSide === 'to') {
