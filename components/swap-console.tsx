@@ -113,20 +113,81 @@ const SESSION_MODE_KEY = 'open-route-swap.okx.mode';
 const SESSION_PROXY_KEY = 'open-route-swap.okx.proxy';
 const DEFAULT_NATIVE_GAS_RESERVE = '0.01';
 const SLIPPAGE_PRESETS = ['0.3', '0.5', '1'];
+const DEFAULT_MAX_AUTO_SLIPPAGE = '1';
 const CANDLE_BARS = ['1m', '5m', '15m', '1H', '4H', '1Dutc'] as const;
 const CANDLE_LIMIT = '120';
 const ADDRESS_CANDIDATE_PATTERN = /0x[a-fA-F0-9]{40}|[1-9A-HJ-NP-Za-km-z]{32,44}/g;
+const USER_REJECTED_ERROR_CODES = new Set([4001, 4100, 5000, 5001]);
+const USER_REJECTED_ERROR_PATTERNS = [
+  'user rejected',
+  'rejected by user',
+  'user denied',
+  'user cancelled',
+  'user canceled',
+  'cancelled by user',
+  'canceled by user',
+  'rejected the request',
+  'denied transaction',
+  'denied message',
+  'declined by user',
+  'signature request denied',
+  'transaction signature declined',
+  'request rejected',
+  'request declined',
+  'operation cancelled',
+  'operation canceled',
+  'walletsigntransactionerror',
+];
 
 function getTokenColor(symbol: string): string {
   return TOKEN_COLORS[symbol.toUpperCase()] || '#4f8f86';
 }
 
 function readErrorMessage(error: unknown, fallback: string): string {
+  if (isUserRejectedError(error)) return '已取消操作';
   if (error instanceof Error && error.message) return error.message;
   if (typeof error === 'object' && error !== null && 'message' in error) {
     return String((error as { message?: unknown }).message || fallback);
   }
   return fallback;
+}
+
+function isUserRejectedError(error: unknown): boolean {
+  const candidates: unknown[] = [];
+  const queue: unknown[] = [error];
+
+  while (queue.length) {
+    const current = queue.shift();
+    if (!current || candidates.includes(current)) continue;
+    candidates.push(current);
+
+    if (typeof current === 'object') {
+      const record = current as Record<string, unknown>;
+      queue.push(record.cause, record.error, record.data, record.originalError);
+    }
+  }
+
+  return candidates.some((current) => {
+    if (typeof current === 'object' && current !== null) {
+      const record = current as Record<string, unknown>;
+      const rawCode = record.code;
+      if (typeof rawCode === 'number' && USER_REJECTED_ERROR_CODES.has(rawCode)) return true;
+      if (typeof rawCode === 'string' && USER_REJECTED_ERROR_CODES.has(Number(rawCode))) return true;
+    }
+
+    const text = typeof current === 'string'
+      ? current
+      : current instanceof Error
+        ? `${current.name} ${current.message}`
+        : typeof current === 'object' && current !== null
+          ? ['name', 'message', 'shortMessage', 'details', 'reason']
+            .map((key) => String((current as Record<string, unknown>)[key] || ''))
+            .join(' ')
+          : '';
+
+    const normalized = text.toLowerCase();
+    return USER_REJECTED_ERROR_PATTERNS.some((pattern) => normalized.includes(pattern));
+  });
 }
 
 function isSameToken(left: string, right: string, chainKey: ChainKey): boolean {
@@ -709,6 +770,92 @@ function SettingsSheet({
   );
 }
 
+function SlippageControl({
+  slippage,
+  autoSlippage,
+  maxAutoSlippage,
+  onSlippageChange,
+  onAutoSlippageChange,
+  onMaxAutoSlippageChange,
+}: {
+  slippage: string;
+  autoSlippage: boolean;
+  maxAutoSlippage: string;
+  onSlippageChange: (value: string) => void;
+  onAutoSlippageChange: (value: boolean) => void;
+  onMaxAutoSlippageChange: (value: string) => void;
+}) {
+  return (
+    <div className="mt-3 rounded-xl border border-white/[0.08] bg-white/[0.035] p-1">
+      <div className="flex items-center gap-1">
+        {SLIPPAGE_PRESETS.map((value) => (
+          <button
+            type="button"
+            key={value}
+            onClick={() => {
+              onAutoSlippageChange(false);
+              onSlippageChange(value);
+            }}
+            className={`mono-num h-8 flex-1 rounded-lg text-xs transition active:translate-y-px ${
+              !autoSlippage && slippage === value
+                ? 'border border-white/[0.12] bg-[#374151] text-white shadow-inset'
+                : 'border border-transparent text-white/45 hover:bg-[#242c35] hover:text-white/72'
+            }`}
+          >
+            {value}%
+          </button>
+        ))}
+        <input
+          value={slippage}
+          onChange={(event) => {
+            onAutoSlippageChange(false);
+            onSlippageChange(normalizeDecimalInput(event.target.value));
+          }}
+          aria-label="固定滑点"
+          className="mono-num h-8 w-14 rounded-lg border border-white/[0.06] bg-white/[0.04] px-2 text-center text-xs text-white outline-none focus:border-teal-300/35 sm:w-16"
+        />
+      </div>
+
+      <div className="mt-1 flex flex-col gap-2 rounded-lg border border-white/[0.06] bg-[#11171d]/60 px-2 py-2 min-[420px]:flex-row min-[420px]:items-center">
+        <button
+          type="button"
+          onClick={() => onAutoSlippageChange(!autoSlippage)}
+          aria-pressed={autoSlippage}
+          className="flex min-w-0 flex-1 items-center gap-2 text-left transition active:translate-y-px"
+        >
+          <span className={`flex h-5 w-9 shrink-0 items-center rounded-full border p-0.5 transition ${
+            autoSlippage
+              ? 'justify-end border-teal-300/35 bg-teal-300/20'
+              : 'justify-start border-white/[0.1] bg-white/[0.045]'
+          }`}
+          >
+            <span className={`h-4 w-4 rounded-full transition ${autoSlippage ? 'bg-teal-200' : 'bg-white/45'}`} />
+          </span>
+          <span className="min-w-0">
+            <span className="block text-xs font-medium text-white/72">OKX 自动滑点</span>
+            <span className="block truncate text-[11px] text-white/36">
+              {autoSlippage ? '按市场数据计算，受上限保护' : '使用固定滑点'}
+            </span>
+          </span>
+        </button>
+
+        <label className="flex shrink-0 items-center gap-1.5 text-[11px] text-white/45">
+          <span>上限</span>
+          <input
+            value={maxAutoSlippage}
+            onChange={(event) => onMaxAutoSlippageChange(normalizeDecimalInput(event.target.value))}
+            disabled={!autoSlippage}
+            inputMode="decimal"
+            aria-label="自动滑点上限"
+            className="mono-num h-8 w-16 rounded-lg border border-white/[0.06] bg-white/[0.04] px-2 text-center text-xs text-white outline-none transition focus:border-teal-300/35 disabled:text-white/32"
+          />
+          <span>%</span>
+        </label>
+      </div>
+    </div>
+  );
+}
+
 function InputBlock({
   label,
   value,
@@ -740,6 +887,7 @@ function ConfirmSwapModal({
   toToken,
   amount,
   quote,
+  slippageLabel,
   onClose,
   onConfirm,
 }: {
@@ -749,6 +897,7 @@ function ConfirmSwapModal({
   toToken: TokenInfo;
   amount: string;
   quote: OkxQuote | null;
+  slippageLabel: string;
   onClose: () => void;
   onConfirm: () => void;
 }) {
@@ -779,7 +928,7 @@ function ConfirmSwapModal({
           <div className="grid grid-cols-2 gap-2 text-xs text-white/50">
             <div className="soft-inset rounded-xl p-3">
               <div>滑点</div>
-              <div className="mono-num mt-1 text-white/80">{quote ? formatPercent(quote.priceImpactPercent) : '--'}</div>
+              <div className="mono-num mt-1 text-white/80">{slippageLabel}</div>
             </div>
             <div className="soft-inset rounded-xl p-3">
               <div>平台费</div>
@@ -1058,6 +1207,8 @@ export function SwapConsole() {
   const [toAddress, setToAddress] = useState(() => getDefaultToToken(getDefaultChainKey()).address);
   const [amount, setAmount] = useState('');
   const [slippage, setSlippage] = useState('0.5');
+  const [autoSlippage, setAutoSlippage] = useState(false);
+  const [maxAutoSlippage, setMaxAutoSlippage] = useState(DEFAULT_MAX_AUTO_SLIPPAGE);
   const [balances, setBalances] = useState<Record<string, TokenBalance>>({});
   const [quote, setQuote] = useState<OkxQuote | null>(null);
   const [quoteLoading, setQuoteLoading] = useState(false);
@@ -1148,6 +1299,14 @@ export function SwapConsole() {
   const routeLabel = quote?.routes?.length
     ? quote.routes.slice(0, 2).map((route) => `${route.dex} ${route.percent}%`).join(' / ')
     : '--';
+  const swapSlippageParams = useMemo(() => ({
+    slippagePercent: slippage || '0',
+    autoSlippage,
+    maxAutoSlippagePercent: autoSlippage ? maxAutoSlippage : undefined,
+  }), [autoSlippage, maxAutoSlippage, slippage]);
+  const activeSlippageLabel = autoSlippage
+    ? `自动 <= ${maxAutoSlippage || '--'}%`
+    : `${slippage || '--'}%`;
 
   const primaryIssue = useMemo(() => {
     if (!wallet.connected) return '连接钱包';
@@ -1158,6 +1317,8 @@ export function SwapConsole() {
     if (configError) return configError;
     if (!isPositiveAmount(amount)) return '输入数量';
     if (!amountRaw) return '数量无效';
+    if (!slippage && !autoSlippage) return '设置滑点';
+    if (autoSlippage && !maxAutoSlippage) return '设置自动滑点上限';
     if (balanceTooLow) return '余额不足';
     if (quoteLoading) return '报价中';
     if (!quote) return '获取报价';
@@ -1166,12 +1327,15 @@ export function SwapConsole() {
   }, [
     amount,
     amountRaw,
+    autoSlippage,
     balanceTooLow,
     configError,
     expectedChainLabel,
+    maxAutoSlippage,
     okxClient.isReady,
     quote,
     quoteLoading,
+    slippage,
     isSolanaSelected,
     wallet.connected,
     wallet.kind,
@@ -1409,7 +1573,14 @@ export function SwapConsole() {
   const fetchQuote = useCallback(async () => {
     setQuote(null);
     setQuoteError(null);
-    if (!isSupportedSwapChain(chainKey) || !okxClient.isReady || !isPositiveAmount(amount) || !amountRaw) {
+    if (
+      !isSupportedSwapChain(chainKey)
+      || !okxClient.isReady
+      || !isPositiveAmount(amount)
+      || !amountRaw
+      || (!autoSlippage && !slippage)
+      || (autoSlippage && !maxAutoSlippage)
+    ) {
       return;
     }
     if (isSameToken(fromToken.address, toToken.address, chainKey)) {
@@ -1436,7 +1607,7 @@ export function SwapConsole() {
     } finally {
       if (requestId === quoteRequestIdRef.current) setQuoteLoading(false);
     }
-  }, [amount, amountRaw, chainKey, fromToken.address, okxClient, slippage, toToken.address]);
+  }, [amount, amountRaw, autoSlippage, chainKey, fromToken.address, maxAutoSlippage, okxClient, slippage, toToken.address]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -1581,7 +1752,7 @@ export function SwapConsole() {
           fromTokenAddress: fromToken.address,
           toTokenAddress: toToken.address,
           amount: amountRaw,
-          slippagePercent: slippage,
+          ...swapSlippageParams,
           userWalletAddress: wallet.address,
           feePercent: REQUIRED_OKX_FEE_PERCENT,
           fromTokenReferrerWalletAddress: solanaReferrerAddress,
@@ -1641,7 +1812,7 @@ export function SwapConsole() {
         fromTokenAddress: fromToken.address,
         toTokenAddress: toToken.address,
         amount: amountRaw,
-        slippagePercent: slippage,
+        ...swapSlippageParams,
         userWalletAddress: wallet.address,
         feePercent: REQUIRED_OKX_FEE_PERCENT,
         fromTokenReferrerWalletAddress: referrerAddress,
@@ -1682,9 +1853,9 @@ export function SwapConsole() {
     quote,
     refreshBalances,
     referrerAddress,
-    slippage,
     solanaReferrerAddress,
     solanaWallet.signTransaction,
+    swapSlippageParams,
     toToken.address,
     toToken.symbol,
     updateHistoryStatus,
@@ -1782,29 +1953,14 @@ export function SwapConsole() {
                 />
               </div>
 
-              <div className="mt-3">
-                <div className="flex items-center gap-1 rounded-xl border border-white/[0.08] bg-white/[0.035] p-1">
-                  {SLIPPAGE_PRESETS.map((value) => (
-                    <button
-                      type="button"
-                      key={value}
-                      onClick={() => setSlippage(value)}
-                      className={`mono-num h-8 flex-1 rounded-lg text-xs transition active:translate-y-px ${
-                        slippage === value
-                          ? 'border border-white/[0.12] bg-[#374151] text-white shadow-inset'
-                          : 'border border-transparent text-white/45 hover:bg-[#242c35] hover:text-white/72'
-                      }`}
-                    >
-                      {value}%
-                    </button>
-                  ))}
-                  <input
-                    value={slippage}
-                    onChange={(event) => setSlippage(normalizeDecimalInput(event.target.value))}
-                    className="mono-num h-8 w-14 rounded-lg border border-white/[0.06] bg-white/[0.04] px-2 text-center text-xs text-white outline-none focus:border-teal-300/35 sm:w-16"
-                  />
-                </div>
-              </div>
+              <SlippageControl
+                slippage={slippage}
+                autoSlippage={autoSlippage}
+                maxAutoSlippage={maxAutoSlippage}
+                onSlippageChange={setSlippage}
+                onAutoSlippageChange={setAutoSlippage}
+                onMaxAutoSlippageChange={setMaxAutoSlippage}
+              />
 
               {(configError || quoteError || executionError || highImpact || quote?.isHoneyPot) ? (
                 <div className="mt-3 flex gap-2 rounded-xl border border-amber-200/16 bg-amber-200/[0.055] px-3 py-2 text-xs text-amber-100/82">
@@ -1845,6 +2001,7 @@ export function SwapConsole() {
                   <InfoRow label="价格影响" value={formatPercent(quote.priceImpactPercent)} danger={highImpact} />
                   <InfoRow label="Gas 估算" value={quote.estimateGasFee ? `${formatNumber(quote.estimateGasFee, 6)} ${nativeGasSymbol}` : '--'} />
                   <InfoRow label="路径" value={routeLabel} />
+                  <InfoRow label="滑点设置" value={activeSlippageLabel} />
                   <InfoRow label="平台费" value={`${REQUIRED_OKX_FEE_PERCENT}%`} />
                 </div>
               ) : (
@@ -1967,6 +2124,7 @@ export function SwapConsole() {
         toToken={toToken}
         amount={amount}
         quote={quote}
+        slippageLabel={activeSlippageLabel}
         onClose={() => setConfirmOpen(false)}
         onConfirm={executeSwap}
       />

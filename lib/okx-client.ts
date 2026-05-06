@@ -107,6 +107,12 @@ export type OkxCandle = {
   raw: unknown;
 };
 
+type OkxSlippageParams = {
+  slippagePercent: string;
+  autoSlippage?: boolean;
+  maxAutoSlippagePercent?: string;
+};
+
 type OkxEnvelope = {
   code?: string;
   msg?: string;
@@ -378,6 +384,16 @@ function normalizeSignerProxyUrl(value: string): string {
   }
 }
 
+function appendSwapSlippageParams(query: URLSearchParams, params: OkxSlippageParams): void {
+  query.set('slippagePercent', params.slippagePercent);
+  query.set('autoSlippage', params.autoSlippage ? 'true' : 'false');
+
+  const maxAutoSlippagePercent = params.maxAutoSlippagePercent?.trim();
+  if (params.autoSlippage && maxAutoSlippagePercent) {
+    query.set('maxAutoSlippagePercent', maxAutoSlippagePercent);
+  }
+}
+
 export class OkxClient {
   private readonly config: OkxClientConfig;
 
@@ -594,6 +610,8 @@ export class OkxClient {
     toTokenAddress: string;
     amount: string;
     slippagePercent: string;
+    autoSlippage?: boolean;
+    maxAutoSlippagePercent?: string;
     userWalletAddress: string;
     fromTokenReferrerWalletAddress: string;
     feePercent?: string;
@@ -604,13 +622,13 @@ export class OkxClient {
       fromTokenAddress: normalizeTokenAddress(params.fromTokenAddress, params.chainKey),
       toTokenAddress: normalizeTokenAddress(params.toTokenAddress, params.chainKey),
       amount: params.amount,
-      slippagePercent: params.slippagePercent,
       userWalletAddress: params.userWalletAddress,
       swapMode: 'exactIn',
       feePercent: params.feePercent || REQUIRED_OKX_FEE_PERCENT,
       fromTokenReferrerWalletAddress: params.fromTokenReferrerWalletAddress,
       priceImpactProtectionPercent: '10',
     });
+    appendSwapSlippageParams(query, params);
     const result = await this.request('GET', '/api/v6/dex/aggregator/swap', query);
     assertOkxSuccess(result);
     const swap = firstDataObject(result);
@@ -648,6 +666,8 @@ export class OkxClient {
     toTokenAddress: string;
     amount: string;
     slippagePercent: string;
+    autoSlippage?: boolean;
+    maxAutoSlippagePercent?: string;
     userWalletAddress: string;
     fromTokenReferrerWalletAddress: string;
     feePercent?: string;
@@ -658,13 +678,12 @@ export class OkxClient {
       fromTokenAddress: normalizeTokenAddress(params.fromTokenAddress, 'solana'),
       toTokenAddress: normalizeTokenAddress(params.toTokenAddress, 'solana'),
       amount: params.amount,
-      slippagePercent: params.slippagePercent,
       userWalletAddress: params.userWalletAddress,
-      autoSlippage: 'false',
       pathNum: '3',
       feePercent: params.feePercent || REQUIRED_OKX_FEE_PERCENT,
       fromTokenReferrerWalletAddress: params.fromTokenReferrerWalletAddress,
     });
+    appendSwapSlippageParams(query, params);
     const result = await this.request('GET', '/api/v6/dex/aggregator/swap-instruction', query);
     assertOkxSuccess(result);
     const swap = firstDataObject(result);
