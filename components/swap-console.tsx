@@ -14,6 +14,7 @@ import {
   ChevronDown,
   ClipboardPaste,
   ExternalLink,
+  Github,
   Loader2,
   Power,
   RefreshCw,
@@ -1899,6 +1900,15 @@ export function SwapConsole() {
               <IconButton title="OKX 设置" onClick={() => setSettingsOpen(true)}>
                 <Settings className="h-4 w-4" />
               </IconButton>
+              <a
+                href="https://github.com/luoyeETH/open-route-swap"
+                target="_blank"
+                rel="noopener noreferrer"
+                title="GitHub"
+                className="flex h-9 w-9 items-center justify-center rounded-lg border border-white/[0.1] bg-white/[0.055] text-white/70 transition hover:bg-white/[0.08] hover:text-white active:translate-y-px"
+              >
+                <Github className="h-4 w-4" />
+              </a>
               <button
                 type="button"
                 onClick={handleConnect}
