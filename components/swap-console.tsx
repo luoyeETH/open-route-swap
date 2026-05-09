@@ -55,6 +55,7 @@ import {
   getEnvDemoCredentials,
   type OkxTokenBalance,
 } from '@/lib/okx-client';
+import TradingViewChart from '@/components/trading-view-chart';
 import {
   WalletState,
   approveToken,
@@ -1041,96 +1042,10 @@ function ConfirmSwapModal({
   );
 }
 
-function candleTimestampToMs(timestamp: string): number {
-  const parsed = Number(timestamp);
-  if (!Number.isFinite(parsed)) return Date.now();
-  return parsed > 1_000_000_000_000 ? parsed : parsed * 1000;
-}
-
-function formatCandleTime(timestamp: string): string {
-  return new Date(candleTimestampToMs(timestamp)).toLocaleString('zh-CN', {
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-  });
-}
-
 function formatCandlePrice(value: number | null | undefined): string {
   if (!Number.isFinite(value)) return '--';
   const price = Number(value);
   return formatNumber(price, Math.abs(price) < 0.01 ? 10 : 6);
-}
-
-function CandleChart({ candles }: { candles: OkxCandle[] }) {
-  const width = 720;
-  const height = 300;
-  const padding = { top: 16, right: 14, bottom: 26, left: 58 };
-  const innerWidth = width - padding.left - padding.right;
-  const innerHeight = height - padding.top - padding.bottom;
-  const lows = candles.map((candle) => candle.low);
-  const highs = candles.map((candle) => candle.high);
-  const low = Math.min(...lows);
-  const high = Math.max(...highs);
-  const range = high - low || Math.max(high * 0.002, 1);
-  const minPrice = low - range * 0.05;
-  const maxPrice = high + range * 0.05;
-  const yForPrice = (price: number) => padding.top + ((maxPrice - price) / (maxPrice - minPrice)) * innerHeight;
-  const step = candles.length > 1 ? innerWidth / (candles.length - 1) : innerWidth;
-  const bodyWidth = Math.max(2, Math.min(8, step * 0.58));
-  const ticks = Array.from({ length: 4 }, (_, index) => maxPrice - ((maxPrice - minPrice) * index) / 3);
-
-  return (
-    <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label="K 线图" className="h-full w-full">
-      <rect x="0" y="0" width={width} height={height} rx="14" fill="rgba(255,255,255,0.025)" />
-      {ticks.map((tick) => {
-        const y = yForPrice(tick);
-        return (
-          <g key={tick}>
-            <line x1={padding.left} x2={width - padding.right} y1={y} y2={y} stroke="rgba(255,255,255,0.07)" strokeWidth="1" />
-            <text x={padding.left - 8} y={y + 4} textAnchor="end" className="fill-white/38 text-[11px] mono-num">
-              {formatCandlePrice(tick)}
-            </text>
-          </g>
-        );
-      })}
-      {candles.map((candle, index) => {
-        const x = padding.left + (candles.length > 1 ? step * index : innerWidth / 2);
-        const highY = yForPrice(candle.high);
-        const lowY = yForPrice(candle.low);
-        const openY = yForPrice(candle.open);
-        const closeY = yForPrice(candle.close);
-        const isUp = candle.close >= candle.open;
-        const color = isUp ? '#2dd4bf' : '#fb7185';
-        const rawHeight = Math.abs(openY - closeY);
-        const bodyHeight = Math.max(1, rawHeight);
-        const bodyY = Math.min(openY, closeY) - (rawHeight < 1 ? 0.5 : 0);
-        return (
-          <g key={`${candle.timestamp}:${index}`}>
-            <line x1={x} x2={x} y1={highY} y2={lowY} stroke={color} strokeWidth="1.25" />
-            <rect
-              x={x - bodyWidth / 2}
-              y={bodyY}
-              width={bodyWidth}
-              height={bodyHeight}
-              rx="0.8"
-              fill={isUp ? 'rgba(45,212,191,0.82)' : 'rgba(251,113,133,0.82)'}
-            />
-          </g>
-        );
-      })}
-      {candles.length ? (
-        <>
-          <text x={padding.left} y={height - 7} className="fill-white/34 text-[11px] mono-num">
-            {formatCandleTime(candles[0].timestamp)}
-          </text>
-          <text x={width - padding.right} y={height - 7} textAnchor="end" className="fill-white/34 text-[11px] mono-num">
-            {formatCandleTime(candles[candles.length - 1].timestamp)}
-          </text>
-        </>
-      ) : null}
-    </svg>
-  );
 }
 
 function KlineModal({
@@ -1259,7 +1174,7 @@ function KlineModal({
             </div>
           </div>
 
-          <div className="h-[260px] rounded-lg border border-white/[0.1] bg-white/[0.025] p-2 sm:h-[320px]">
+          <div className="h-[260px] overflow-hidden rounded-lg border border-white/[0.1] bg-white/[0.025] sm:h-[320px]">
             {loading ? (
               <div className="h-full space-y-3 p-3">
                 <div className="skeleton h-7 w-40 rounded-lg" />
@@ -1270,7 +1185,7 @@ function KlineModal({
                 {error}
               </div>
             ) : candles.length ? (
-              <CandleChart candles={candles} />
+              <TradingViewChart candles={candles} />
             ) : (
               <div className="flex h-full items-center justify-center text-sm text-white/40">
                 暂无 K 线数据
