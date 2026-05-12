@@ -2,7 +2,7 @@
 
 Open Route Swap 是一个基于 OKX DEX API 的轻量级 Swap 前端，用来把 OKX 聚合器的报价和路由能力，以更透明、可自部署的方式提供给钱包用户。
 
-为什么要做这个项目：OKX DEX 网页界面会对部分兑换路径收取界面费用，官方费率表包含 `0%`、`0.25%` 和 `0.85%` 三档。通过 OKX DEX API 构造交易时，用户不走 OKX DEX 网页界面费；OKX 的 API 文档也说明 Trial API Tier 在试用期内可免费访问。这个项目适合想自己部署一个简单 Swap 页面、保留 OKX 路由能力，同时减少额外界面费用影响的场景。
+为什么要做这个项目：OKX DEX 网页界面会对部分兑换路径收取界面费用。根据 OKX 于 2026-05-09 发布的收费调整公告，OKX DEX 界面费用费率自 2026-05-12 08:00 (UTC+8) 起调整为 `0%`、`0.1%`、`0.25%` 和 `0.5%` 等档位，具体币对类别以 OKX 官方页面为准。通过 OKX DEX API 构造交易时，用户不走 OKX DEX 网页界面费；OKX 的 API 文档也说明 Trial API Tier 在试用期内可免费访问。这个项目适合想自己部署一个简单 Swap 页面、保留 OKX 路由能力，同时减少额外界面费用影响的场景。
 
 重要提醒：OKX Boost 规则明确写到 `API trading is not counted`。也就是说，通过本项目前端发起的 API 交易，不应被预期计入 OKX Boost 交易量统计。
 
@@ -76,8 +76,19 @@ NEXT_PUBLIC_SOLANA_RPC_URL=https://api.mainnet-beta.solana.com
 
 当前实现默认在 swap 请求中设置 `feePercent=0.01`。这不是 OKX DEX 网页界面的 `0.85%` interface fee，而是项目自己的 partner fee 配置。
 
+OKX 费率更新：OKX 官方于 2026-05-09 发布「OKX DEX 收费调整公告」，公告称 OKX DEX 将于 2026-05-12 08:00 (UTC+8) 调整界面费用费率。调整后：
+
+- 类别 1 与类别 1 的币对费率为 `0.1%`。
+- 类别 1 与其他代币的币对费率为 `0.5%`。
+- 类别 2 与其他代币的币对费率为 `0.5%`。
+- 类别 1 与类别 2、类别 2 与类别 2 的币对费率维持 `0.25%`。
+- 其他代币与其他代币的币对费率维持 `0%`。
+
+文档更新时间：2026-05-12 (UTC)。信源：OKX 官方公告「OKX DEX 收费调整公告」。
+
 参考资料：
 
+- [OKX DEX 收费调整公告](https://web3.okx.com/zh-hans/help/update-on-okx-dex-interface-fee)
 - [OKX DEX 服务费](https://web3.okx.com/zh-hans/dex-fees)
 - [OKX DEX API Fee](https://web3.okx.com/build/dev-docs-v5/dex-api/dex-api-fee)
 - [What’s OKX Boost?](https://web3.okx.com/nl/help/what-is-okx-boost)
